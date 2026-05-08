@@ -1,4 +1,4 @@
-# JECP — Joint Execution Capability Protocol
+# JECP — Joint Execution & Commerce Protocol
 
 **Spec Version**: 1.0.0-draft
 **Status**: Draft
@@ -11,11 +11,15 @@ JECP is an open protocol for AI agents to discover, execute, and pay for externa
 
 ## 2. Status of This Memo
 
-This document is a Draft v1.0 of the Joint Execution Capability Protocol. It is published for review and comment by the JECP Working Group. The protocol category is "Agent Commerce Protocol".
+This document is a Draft v1.0 of the Joint Execution & Commerce Protocol. It is published for review and comment by the JECP Working Group. The protocol category is "Agent Commerce Protocol".
 
 A reference implementation runs in production at `https://setsuna-jobdonebot.fly.dev` since April 2026.
 
 This document is governed by Apache License 2.0. Distribution is unlimited.
+
+### 2.1 Naming history
+
+The acronym **JECP** was originally coined as "JobDoneBot Execution Capability Protocol" (May 2026, when the first reference implementation went live). It was subsequently renamed to "Joint Execution Capability Protocol" upon initial public spec release (Sprint 4, May 2026), and to "Joint Execution & Commerce Protocol" upon transition to a multi-vendor standard track. The acronym `JECP` and all URLs (`jecp.dev`, `github.com/jecpdev`) are preserved across renames.
 
 ## 3. Terminology
 

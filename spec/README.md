@@ -1,6 +1,6 @@
 # JECP Specification v1.0-draft
 
-This directory contains the formal specification of the **Joint Execution Capability Protocol** (JECP).
+This directory contains the formal specification of the **Joint Execution & Commerce Protocol** (JECP).
 
 | File                              | Topic                                              |
 |-----------------------------------|----------------------------------------------------|
