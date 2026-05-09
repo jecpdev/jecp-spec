@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-draft-orange.svg)](https://jecp.dev/spec)
 [![Version](https://img.shields.io/badge/version-1.0.0--draft-blue.svg)](https://jecp.dev/spec)
+[![npm](https://img.shields.io/npm/v/@jecpdev/sdk?label=%40jecpdev%2Fsdk)](https://www.npmjs.com/package/@jecpdev/sdk)
 
 ---
 
@@ -12,89 +13,94 @@
 
 **JECP** lets AI agents discover external services, manage budgets, charge for usage, and receive artifacts — all through one standard protocol.
 
-JECP is the leading implementation of the **Agent Commerce Protocol** category.
+JECP serves two opposite intents through one protocol:
 
-```
-MCP solved "talking to tools."
-Stripe solved "accepting money."
-JECP solves "agents transacting."
-```
+- **Sell to agents** — turn AI agent traffic into per-call revenue
+- **Build with agents** — give your agent its own wallet and budget cap
 
-## Why JECP?
-
-AI agents in 2026 can think, write, and call tools — but they cannot:
-
-- ✗ Generate and deliver invoices
-- ✗ Process images with multi-step pipelines
-- ✗ Coordinate multiple third-party APIs
-- ✗ Manage budgets across calls
-- ✗ Pay for what they use, get paid for what they provide
-
-JECP fills the gap.
-
-## Core innovations (industry first)
+## Three things JECP gives you
 
 | Feature | What it does |
 |---------|-------------|
-| **Mandate** | Agent budget pre-authorization with auto-stop on overrun |
-| **Trust Gate** | Tier-based capability access (Bronze → Platinum) |
-| **Workflow Capability** | Multi-step orchestration in one request |
-| **Artifact Delivery** | Native binary output (PDF, images, audio) |
+| **Per-agent wallet** | Each agent has its own USDC balance, separate from any human's card. Top up via Stripe. |
+| **Mandate** | Pre-authorize a budget cap. Server enforces it. Autonomous agents can't burn past `budget_usdc`. |
+| **Trust Gate** | Tier-based capability access (Bronze → Silver → Gold → Platinum) earned by call history. |
+| **`next_action`** | Every error returns a machine-readable recovery hint. Agents recover without human intervention. |
+| **Atomic billing** | 85% Provider / 10% Hub / 5% payment, allocated atomically per successful call. Failed calls are not charged. |
+| **Multi-vendor** | Capabilities live under namespaces. Switch Provider without changing agent code. |
+| **Binary artifacts** | Native PDF / image / audio return inline as base64. |
+| **Idempotency** | Safe to retry within 24h on `(agent_id, request_id)`. |
 
-## Quick example
+## Quick start
+
+### TypeScript (recommended)
 
 ```bash
-curl -X POST https://jecp.dev/v1/jecp \
+npm install @jecpdev/sdk
+```
+
+```typescript
+import { JecpClient } from '@jecpdev/sdk';
+
+const jecp = new JecpClient({ agentId, apiKey });
+
+const { output, billing } = await jecp.invoke(
+  'jobdonebot/content-factory', 'translate',
+  { text: 'Hello', target_lang: 'JA' },
+  { mandate: { budget_usdc: 1.00 } },
+);
+```
+
+[Full SDK docs](https://github.com/jecpdev/jecp-sdk-typescript)
+
+### Any language (raw HTTP)
+
+```bash
+curl -X POST https://jecp.dev/v1/invoke \
   -H "X-Agent-ID: jdb_ag_abc" \
   -H "X-API-Key: jdb_ak_xxx" \
   -d '{
     "jecp": "1.0",
-    "id": "req_a3f2",
-    "capability": "document-pipeline",
-    "action": "generate-invoice",
-    "input": {
-      "client_name": "ABC Corp",
-      "items": [{"name": "Web Design", "quantity": 1, "unit_price": 500000}]
-    }
+    "id": "req-001",
+    "capability": "jobdonebot/content-factory",
+    "action": "translate",
+    "input": { "text": "Hello", "target_lang": "JA" }
   }'
 ```
 
-Returns a complete PDF invoice in 127ms.
-
 ## Documentation
 
-- [Specification (Draft)](spec/00-overview.md)
-- [Quickstart](docs/quickstart.md)
-- [Capability Manifest Schema](spec/04-manifest.md)
-- [Authentication & Mandate](spec/02-authentication.md)
-- [Error Catalog](spec/03-errors.md)
+- [Specification (Draft v1.0)](spec/00-overview.md) — full RFC-2119 spec
+- [Authentication & Mandate](spec/02-authentication.md) — how wallets and budget caps work
+- [Error catalog](spec/03-errors.md) — every error code and its `next_action`
+- [Capability manifest schema](spec/04-manifest.md) — how Providers describe their services
+- [Roadmap](ROADMAP.md)
 
-## Reference implementation
+## Live infrastructure
 
-The reference server runs at https://jecp.dev (production).
-
-Source: https://github.com/jecpdev/jecp-server (Apache 2.0)
+- **Hub:** https://jecp.dev (production since April 2026)
+- **Reference Hub source:** https://github.com/jecpdev/jecp-server (Rust + Axum, Apache 2.0)
+- **TS SDK:** https://github.com/jecpdev/jecp-sdk-typescript ([npm](https://www.npmjs.com/package/@jecpdev/sdk))
+- **Live catalog:** https://jecp.dev/v1/capabilities
+- **Health:** https://jecp.dev/health
 
 ## Status
 
-**Draft** (v1.0.0-draft, May 2026)
-
-The specification is in active development. Breaking changes possible until v1.0.0 final.
+**Draft v1.0.0-draft** (May 2026). Breaking changes possible until v1.0 final.
 
 ## Get involved
 
-- [GitHub Discussions](https://github.com/jecpdev/jecp-spec/discussions) — design discussions
-- [Issues](https://github.com/jecpdev/jecp-spec/issues) — bugs and proposals
-- [Discord](https://discord.gg/jecp) — chat with maintainers
+- [Discussions](https://github.com/jecpdev/jecp-spec/discussions) — design questions, RFCs
+- [Issues](https://github.com/jecpdev/jecp-spec/issues) — bugs, spec ambiguities
+- Email: [hello@jecp.dev](mailto:hello@jecp.dev)
 
-## Working group
+## Operator
 
-JECP is developed by the **JECP Working Group**, with reference implementation maintained by JobDoneBot Inc.
-
-Lead author: [@acromoney](https://github.com/acromoney)
+The canonical Hub at jecp.dev is operated by **Tufe Company Inc.** (Tokyo, Japan).
+The protocol is multi-vendor — anyone can run a federated Hub. Reference implementation is Apache 2.0.
 
 ## License
 
 [Apache License 2.0](LICENSE)
 
-The specification text and reference implementation are open source under Apache 2.0. Trademark "JECP" is reserved by JobDoneBot Inc. for the canonical specification.
+The specification, reference Hub implementation, and TypeScript SDK are all open source under Apache 2.0.
