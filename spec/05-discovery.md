@@ -1,7 +1,7 @@
 # JECP — Discovery
 
-**Spec Version**: 1.0.0-draft
-**Status**: Draft
+**Spec Version**: 1.0.0
+**Status**: Stable
 **Companion**: 00-overview.md, 01-protocol.md, 04-manifest.md
 
 ## 1. Abstract

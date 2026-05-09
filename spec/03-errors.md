@@ -1,7 +1,7 @@
 # JECP — Error Catalog
 
-**Spec Version**: 1.0.0-draft
-**Status**: Draft
+**Spec Version**: 1.0.0
+**Status**: Stable
 **Companion**: 00-overview.md, 01-protocol.md
 
 ## 1. Abstract
@@ -207,6 +207,42 @@ Note: This is a per-call check in v1.0. Cumulative spend tracking is reserved fo
 - **HTTP**: 200 (delivered as SSE `error` event)
 - **Cause**: TCP read error from the Provider mid-stream
 - **Retry-safe**: Yes (with backoff); persistent failures suggest selecting an alternative Provider
+
+### 3.5.2 Composites (M3 / Workflow)
+
+Errors specific to composite actions defined in 04-manifest.md §5.2.
+
+#### `COMPOSITE_STEP_FAILED`
+
+- **HTTP**: 502
+- **Cause**: A sub-call inside the composite failed
+- **Retry-safe**: Depends on the underlying error (see `details.upstream_error.code`)
+- **`details`**: `{ "failed_step_id": "<step id>", "upstream_error": <full JECP error envelope>, "refunds_issued": <int>, "unrefunded_step_ids": [...] }`
+
+#### `COMPOSITE_BIND_ERROR`
+
+- **HTTP**: 422
+- **Cause**: Template substitution referenced an unknown prior step or path
+- **Retry-safe**: No (manifest configuration bug)
+
+#### `COMPOSITE_DEPTH_EXCEEDED`
+
+- **HTTP**: 422 (at publish) or 409 (at runtime if a sub-call resolves to another composite mid-flight)
+- **Cause**: `max_depth` violated — v1.0 caps at 1
+- **Retry-safe**: No
+
+#### `COMPOSITE_TIMEOUT`
+
+- **HTTP**: 504
+- **Cause**: Composite total wall-clock exceeded `timeout_total_ms` (default 60 s, max 300 s)
+- **Retry-safe**: Yes (with backoff)
+
+#### `COMPOSITE_REFUND_FAILED`
+
+- **HTTP**: 502
+- **Cause**: With `on_step_failure=rollback`, the Hub could not refund every successful prior step within 5 s of failure. Operator alerts MUST fire.
+- **Retry-safe**: No (escalation only)
+- **`details`**: `{ "unrefunded_step_ids": [...], "manual_intervention_required": true }`
 
 ### 3.6 Provider Errors (5xx, Stage 3)
 

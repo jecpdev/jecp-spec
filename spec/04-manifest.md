@@ -1,7 +1,7 @@
 # JECP — Capability Manifest Schema
 
-**Spec Version**: 1.0.0-draft
-**Status**: Draft (full enforcement at Stage 3)
+**Spec Version**: 1.0.0
+**Status**: Stable (full enforcement at Stage 3)
 **Companion**: 00-overview.md, 01-protocol.md, 05-discovery.md
 
 ## 1. Abstract
@@ -172,7 +172,36 @@ extensions: { ... }           # Vendor-specific
         "output_schema": { "type": "object" },
         "examples":      { "type": "array", "items": { "type": "object" } },
         "side_effects":  { "$ref": "#/$defs/SideEffects" },
-        "sla":           { "$ref": "#/$defs/Sla" }
+        "sla":           { "$ref": "#/$defs/Sla" },
+        "composes":     { "$ref": "#/$defs/Composes" }
+      },
+      "allOf": [
+        { "not": { "required": ["composes", "streaming"] } }
+      ]
+    },
+    "Composes": {
+      "type": "object",
+      "required": ["steps"],
+      "properties": {
+        "max_depth":         { "type": "integer", "minimum": 1, "maximum": 1, "default": 1 },
+        "on_step_failure":   { "enum": ["rollback", "continue"], "default": "rollback" },
+        "timeout_total_ms":  { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 60000 },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items":   { "$ref": "#/$defs/CompositeStep" }
+        }
+      }
+    },
+    "CompositeStep": {
+      "type": "object",
+      "required": ["id", "call", "action", "input"],
+      "properties": {
+        "id":     { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" },
+        "call":   { "type": "string", "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$" },
+        "action": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "input":  { "type": "object" }
       }
     },
     "Pricing": {
@@ -238,6 +267,114 @@ extensions: { ... }           # Vendor-specific
   }
 }
 ```
+
+## 5.2 Composite Actions (M3 / Workflow)
+
+A composite action is a server-side workflow that calls other capabilities and
+returns a single result. The Hub orchestrates the steps, captures the outputs,
+substitutes them into later inputs, and bills the agent **once** for the whole
+composition (the composite's own `pricing.base`).
+
+```yaml
+actions:
+  - id: invoice-and-email
+    name: Generate invoice and email it to the client
+    description: One-shot billing flow — produces the PDF and sends it to the client.
+    pricing:
+      base: $0.05
+      currency: USDC
+      model: flat
+    trust_tier_required: silver
+
+    # Composition metadata. Presence of `composes` MUST make the action composite.
+    composes:
+      max_depth: 1                   # MAY (default 1). v1.0 forbids depth > 1.
+      on_step_failure: rollback      # rollback | continue (rollback issues automatic refunds)
+      timeout_total_ms: 60000        # MAY (default 60000, max 300000)
+      steps:
+        - id: invoice                # step-local name for output binding
+          call: jobdonebot/document-pipeline
+          action: generate-invoice
+          input:
+            client_name:    "${input.client_name}"
+            client_address: "${input.client_address}"
+            due_date:       "${input.due_date}"
+            items:          "${input.items}"
+
+        - id: send
+          call: communication/send-email
+          action: send
+          input:
+            to:          "${input.client_email}"
+            subject:     "Your invoice"
+            body:        "Attached. Total: ${invoice.total_usd} USD."
+            attachments: ["${invoice.pdf_url}"]
+
+    output_schema:
+      type: object
+      required: [invoice, send]
+      properties:
+        invoice: { type: object }
+        send:    { type: object }
+```
+
+### 5.2.1 Composition primitives
+
+| Field                 | Required | Description |
+|-----------------------|----------|-------------|
+| `composes.steps`      | MUST     | Ordered array, 1..8 entries (Hubs MAY reduce). |
+| `composes.steps[].id` | MUST     | Step-local name. Output bound as `${id}` for later steps. Pattern `^[a-z][a-z0-9-]{0,30}$`. Unique within the composite. |
+| `composes.steps[].call` | MUST   | Target capability `namespace/capability` (NOT cross-Hub in v1.0). |
+| `composes.steps[].action` | MUST | Target action id. MUST exist on the resolved capability. |
+| `composes.steps[].input` | MUST  | Object literal with template substitutions (see 5.2.2). |
+| `composes.max_depth`  | MAY      | Allowed nesting (composites calling composites). Default 1. v1.0 only allows 1. |
+| `composes.on_step_failure` | MAY | `rollback` (default) or `continue`. With `rollback`, Hub MUST attempt automatic refunds for any successful prior steps within 5 s of failure. |
+| `composes.timeout_total_ms` | MAY | Wall-clock cap for the whole composite. Default 60 000, max 300 000. |
+
+### 5.2.2 Template substitution
+
+References use `${...}` and resolve in this order:
+
+1. `${input.<path>}` — agent's request input (from `POST /v1/invoke` body).
+2. `${<step_id>}` — full output object of a prior step.
+3. `${<step_id>.<path>}` — JSON-Pointer-style nested access (dotted only; no array indexing in v1.0).
+
+Substitutions happen on the Hub side at step launch, AFTER prior step outputs are available. Templating is purely lexical — no expressions, arithmetic, or function calls. Unresolved references return `COMPOSITE_BIND_ERROR`.
+
+### 5.2.3 Pricing and billing
+
+- The composite's own `pricing.base` is the **only** charge the agent sees.
+- Hubs pay each sub-action's Provider out of the gross via standard 85/10/5 split (per sub-call).
+- The composite's Provider receives the residual (gross − Σ sub-shares − hub_fee). It is the composite Provider's responsibility to price `base` such that the residual is non-negative; the Hub MUST validate this at publish time and reject manifests where the worst-case sub-cost sum exceeds `base * 0.85`.
+- A single `transaction_id` is recorded for the composite. Sub-call `revenue_splits` rows reference the same `transaction_id` with `composite_step_id` populated.
+
+### 5.2.4 Trust tier and Mandate
+
+- The composite's `trust_tier_required` MUST be at least the maximum of any sub-action's required tier (validated at publish time).
+- The agent's Mandate is checked once against the composite's `pricing.base`. Sub-call costs are NOT exposed to the agent.
+
+### 5.2.5 Idempotency
+
+- The composite uses the agent's `request_id` for idempotency at the composite level.
+- The Hub MUST generate deterministic derived request_ids for sub-calls: `<composite_request_id>:<step_id>`. Sub-providers thus see stable ids and benefit from their own idempotency caches on retries.
+
+### 5.2.6 Streaming
+
+Composites are not streamable in v1.0. The action MUST NOT set both `composes` and `streaming: true`. Streaming-of-composites is reserved for v1.1+.
+
+### 5.2.7 Recursion
+
+`max_depth` defaults to 1. A composite step calling another composite is rejected at publish time when the resolved `max_depth` chain would exceed 1. v1.1+ MAY raise the bound after a Workflow trust tier review.
+
+### 5.2.8 Errors specific to composites
+
+| Code                         | HTTP                           | Cause |
+|------------------------------|--------------------------------|-------|
+| `COMPOSITE_STEP_FAILED`      | 502                            | A sub-call returned an error. `details.failed_step_id`, `details.upstream_error` populated. With `on_step_failure=rollback`, refunds were attempted (see `details.refunds_issued`). |
+| `COMPOSITE_BIND_ERROR`       | 422                            | Template referenced an unknown step or path. Configuration bug. |
+| `COMPOSITE_DEPTH_EXCEEDED`   | 422 (publish) / 409 (runtime)  | Depth bound exceeded — likely a sub-call resolved to another composite at runtime. |
+| `COMPOSITE_TIMEOUT`          | 504                            | Whole-composite timeout exceeded `timeout_total_ms`. |
+| `COMPOSITE_REFUND_FAILED`    | 502                            | Rollback could not refund every prior step. `details.unrefunded_step_ids` populated. Operator alerts ON. |
 
 ## 6. Validation Rules
 

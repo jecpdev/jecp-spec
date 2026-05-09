@@ -1,7 +1,7 @@
 # JECP — Wire Format
 
-**Spec Version**: 1.0.0-draft
-**Status**: Draft
+**Spec Version**: 1.0.0
+**Status**: Stable
 **Companion**: 00-overview.md, 02-authentication.md, 03-errors.md
 
 ## 1. Abstract
@@ -274,7 +274,48 @@ Exactly one of `completed`, `error`, or `cancelled` MUST be the last event. If t
 
 **Cancellation.** Closing the agent → Hub connection MUST close the Hub → Provider connection. Hubs MUST charge for delivered output up to the disconnect using the action's flat `pricing.base` (Phase A) or accumulated `meter` totals (Phase B).
 
-### 4.4 Error Response
+### 4.4 Composite Action Execution (M3 / Workflow)
+
+When `POST /v1/invoke` resolves to an action that declares `composes` in its manifest (04-manifest.md §5.2), the Hub orchestrates the composition server-side. The agent sees a single response — same shape as any other invoke — and is billed exactly once at the composite's `pricing.base`.
+
+**Sequence**:
+
+```
+Agent ──POST /v1/invoke──▶ Hub
+                          │ 1. preflight: auth, capability, pricing.base, trust, balance, mandate
+                          │ 2. resolve composes.steps[]
+                          │ 3. acquire wallet lock for pricing.base
+                          │
+                          │ For each step in order:
+                          │   a. substitute ${input.*} and ${prior_step.*}
+                          │   b. POST sub-Provider with derived request_id
+                          │      = "<composite_request_id>:<step_id>"
+                          │   c. record output → bound name
+                          │   d. accumulate sub-revenue_split row (no agent charge)
+                          │
+                          │ 4. on success:
+                          │      compose final result {step_id: output, …}
+                          │      emit single transaction at pricing.base
+                          │      sub-providers paid from gross via revenue_splits
+                          │ 4'. on any step failure with on_step_failure=rollback:
+                          │      stop; for every PRIOR successful step,
+                          │      issue automatic refund (5 s budget);
+                          │      return COMPOSITE_STEP_FAILED with the upstream error
+                          │
+Agent ◀──single response── Hub
+```
+
+**Determinism guarantees**:
+- Steps execute strictly in declaration order (no parallelism in v1.0).
+- Each sub-call's `request_id` is `<composite_request_id>:<step_id>` so Provider-side idempotency caches absorb retries cleanly.
+- Whole-composite timeout is `composes.timeout_total_ms` (default 60 s, max 300 s).
+- A single `transaction_id` is recorded for billing. Sub-call `revenue_splits` rows reference the same `transaction_id` with `composite_step_id` populated for audit.
+
+**Constraints**:
+- `composes` and `streaming: true` MUST NOT both be present (composites are not streamable in v1.0).
+- `max_depth` MUST be 1 in v1.0. A sub-call resolving to another composite at runtime returns `COMPOSITE_DEPTH_EXCEEDED` (HTTP 409) and the wallet lock is released without charge.
+
+### 4.5 Error Response
 
 See 03-errors.md for the complete error catalog. Error responses follow this structure:
 

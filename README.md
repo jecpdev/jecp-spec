@@ -3,8 +3,8 @@
 > **Joint Execution & Commerce Protocol** — the open protocol for AI agent commerce.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-draft-orange.svg)](https://jecp.dev/spec)
-[![Version](https://img.shields.io/badge/version-1.0.0--draft-blue.svg)](https://jecp.dev/spec)
+[![Status](https://img.shields.io/badge/status-stable-brightgreen.svg)](https://jecp.dev/spec)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://jecp.dev/spec)
 [![npm](https://img.shields.io/npm/v/@jecpdev/sdk?label=%40jecpdev%2Fsdk)](https://www.npmjs.com/package/@jecpdev/sdk)
 
 ---
@@ -70,7 +70,7 @@ curl -X POST https://jecp.dev/v1/invoke \
 
 ## Documentation
 
-- [Specification (Draft v1.0)](spec/00-overview.md) — full RFC-2119 spec
+- [Specification v1.0](spec/00-overview.md) — full RFC-2119 spec
 - [Authentication & Mandate](spec/02-authentication.md) — how wallets and budget caps work
 - [Error catalog](spec/03-errors.md) — every error code and its `next_action`
 - [Capability manifest schema](spec/04-manifest.md) — how Providers describe their services
@@ -86,7 +86,7 @@ curl -X POST https://jecp.dev/v1/invoke \
 
 ## Status
 
-**Draft v1.0.0-draft** (May 2026). Breaking changes possible until v1.0 final.
+**v1.0.0 — Stable** (May 2026). Backwards-compatible additions ship as v1.x; breaking changes will require v2.0.
 
 ## Get involved
 

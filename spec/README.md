@@ -1,4 +1,4 @@
-# JECP Specification v1.0-draft
+# JECP Specification v1.0
 
 This directory contains the formal specification of the **Joint Execution & Commerce Protocol** (JECP).
 
@@ -11,6 +11,6 @@ This directory contains the formal specification of the **Joint Execution & Comm
 | [04-manifest.md](04-manifest.md)  | Capability Manifest YAML schema (Stage 3 Providers) |
 | [05-discovery.md](05-discovery.md)| Well-known URIs, agent-guide.json structure        |
 
-**Status**: Draft (v1.0.0-draft, 2026-05-07)
+**Status**: Stable (v1.0.0, 2026-05-09)
 **License**: Apache 2.0
 **Reference implementation**: https://github.com/jecpdev/jecp-server (production: https://setsuna-jobdonebot.fly.dev)

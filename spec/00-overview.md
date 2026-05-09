@@ -1,7 +1,7 @@
 # JECP — Joint Execution & Commerce Protocol
 
-**Spec Version**: 1.0.0-draft
-**Status**: Draft
+**Spec Version**: 1.0.0
+**Status**: Stable
 **Date**: 2026-05-07
 **License**: Apache 2.0
 
