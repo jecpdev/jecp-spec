@@ -73,10 +73,16 @@ actions:                      # MUST. Non-empty array
   - id: <string>              # MUST. ^[a-z][a-z0-9-]{2,63}$
     name: <string>            # SHOULD
     description: <string>     # MUST. <= 300 chars
+    streaming: <bool>         # MAY. Default false. If true, Hub serves SSE on /v1/invoke (see 01-protocol.md §4.3)
     pricing:                  # MUST
-      base: <currency string> # e.g., "$0.005"
+      base: <currency string> # e.g., "$0.005" — flat/up-front charge used by Hub for budget pre-flight
       currency: USD | USDC | both
-      model: per_call | per_token | tiered
+      model: flat | per_call | per_token | per_chunk | per_second | tiered
+      # Optional unit rates for variable models (Phase B variable pricing engine):
+      input_per_token_usdc: <number>   # for model=per_token
+      output_per_token_usdc: <number>  # for model=per_token
+      per_chunk_usdc: <number>         # for model=per_chunk
+      audio_per_second_usdc: <number>  # for model=per_second
     trust_tier_required: bronze | silver | gold | platinum  # MAY. Default bronze
     rate_limit_rpm: <int>     # MAY. 0 = use Hub default
     input_schema:             # MUST. JSON Schema 2020-12 subset
@@ -158,6 +164,7 @@ extensions: { ... }           # Vendor-specific
         "id":          { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
         "name":        { "type": "string", "maxLength": 100 },
         "description": { "type": "string", "maxLength": 300 },
+        "streaming":   { "type": "boolean", "default": false },
         "pricing":     { "$ref": "#/$defs/Pricing" },
         "trust_tier_required": { "enum": ["bronze","silver","gold","platinum"] },
         "rate_limit_rpm": { "type": "integer", "minimum": 0 },
@@ -174,7 +181,11 @@ extensions: { ... }           # Vendor-specific
       "properties": {
         "base":     { "type": "string", "pattern": "^\\$\\d+(\\.\\d+)?$" },
         "currency": { "enum": ["USD", "USDC", "both"] },
-        "model":    { "enum": ["per_call", "per_token", "tiered"] }
+        "model":    { "enum": ["flat", "per_call", "per_token", "per_chunk", "per_second", "tiered"] },
+        "input_per_token_usdc":  { "type": "number", "minimum": 0 },
+        "output_per_token_usdc": { "type": "number", "minimum": 0 },
+        "per_chunk_usdc":        { "type": "number", "minimum": 0 },
+        "audio_per_second_usdc": { "type": "number", "minimum": 0 }
       }
     },
     "Authentication": {

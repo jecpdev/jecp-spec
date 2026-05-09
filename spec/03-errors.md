@@ -168,6 +168,46 @@ Note: This is a per-call check in v1.0. Cumulative spend tracking is reserved fo
 - **Headers**: `Retry-After: <seconds>`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 - **`details`**: `{ "tier": "<bronze|silver|gold|platinum>", "limit_rpm": <int>, "reset_at": "<RFC 3339>" }`
 
+### 3.5.1 Streaming (4xx / SSE event)
+
+#### `NOT_STREAMABLE`
+
+- **HTTP**: 406
+- **Cause**: Request was sent with `Accept: text/event-stream` but the resolved capability action does not declare `streaming: true` in its manifest
+- **Retry-safe**: Yes (resend without the streaming Accept header, or pick a streaming-capable action)
+- **Recovery**: See 04-manifest.md §5 for the `streaming` flag
+
+#### `STREAM_IN_PROGRESS`
+
+- **HTTP**: 409
+- **Cause**: A previous streaming request with the same `(agent_id, id)` is still open
+- **Retry-safe**: Yes (after the first stream terminates)
+- **Note**: Reserved for Phase B; Phase A Hubs MAY skip this check
+
+#### `STREAM_TIMEOUT`
+
+- **HTTP**: 200 (delivered as SSE `cancelled` event)
+- **Cause**: Total stream duration exceeded the Hub's hard cap (5 minutes default)
+- **Retry-safe**: Yes (with shorter expected duration)
+
+#### `PROVIDER_TIMEOUT` (streaming)
+
+- **HTTP**: 200 (delivered as SSE `cancelled` event)
+- **Cause**: No progress from the Provider for the no-progress window (30 s default)
+- **Retry-safe**: Yes; consider an alternative Provider
+
+#### `STREAM_INCOMPLETE`
+
+- **HTTP**: 200 (delivered as SSE `error` event)
+- **Cause**: Provider closed the stream without emitting any of `completed`, `error`, or `cancelled`
+- **Retry-safe**: Yes
+
+#### `PROVIDER_DISCONNECT`
+
+- **HTTP**: 200 (delivered as SSE `error` event)
+- **Cause**: TCP read error from the Provider mid-stream
+- **Retry-safe**: Yes (with backoff); persistent failures suggest selecting an alternative Provider
+
 ### 3.6 Provider Errors (5xx, Stage 3)
 
 #### `PROVIDER_ERROR`

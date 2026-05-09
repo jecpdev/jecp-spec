@@ -232,7 +232,49 @@ data: {"code":"...","message":"..."}
 
 before closing the stream.
 
-### 4.3 Error Response
+### 4.3 Provider Streaming on `/v1/invoke`
+
+When an agent invokes a third-party Provider via `POST /v1/invoke` with `Accept: text/event-stream`, the Hub forwards the Provider's SSE stream back to the agent chunk-by-chunk. Billing settles when the Provider emits `completed`.
+
+**Eligibility.** The capability action's manifest MUST declare `streaming: true` (see 04-manifest.md §5). A streaming request against a non-streaming action MUST return HTTP 406 `NOT_STREAMABLE`.
+
+**Wire format.** The Hub serves `Content-Type: text/event-stream` with five event types:
+
+```
+event: open
+data: {"request_id":"req-1","capability":"llm/chat","action":"complete"}
+
+event: chunk
+data: {"delta":"Hello","index":0}
+
+event: meter
+data: {"tokens":12,"elapsed_ms":340}
+
+event: completed
+data: {"result":{...},"billing":{"charged":true,"amount_usdc":...,"transaction_id":"tx-..."},"provider":{...},"meter_summary":{...}}
+```
+
+**Event types.**
+
+| Event       | Direction | Cardinality       | Description |
+|-------------|-----------|-------------------|-------------|
+| `open`      | Hub → Agent      | 1, first event    | Connection to Provider established. |
+| `chunk`     | Provider → Agent | 0..N              | Incremental output (`delta`, optional `index`). |
+| `meter`     | Provider → Agent | 0..N              | Periodic usage update. Hub accumulates for Phase B variable pricing. |
+| `completed` | Hub → Agent      | 0..1, terminal    | Stream ended successfully. Hub re-emits with billing info attached. |
+| `error`     | Hub → Agent      | 0..1, terminal    | Stream ended with an error. |
+| `cancelled` | Hub → Agent      | 0..1, terminal    | Stream cancelled by Hub (timeout, Mandate exhaustion, agent abort). |
+
+Exactly one of `completed`, `error`, or `cancelled` MUST be the last event. If the connection drops without one, both Hub and agent MUST treat the stream as `cancelled`.
+
+**Termination guarantees.**
+- Streams are NOT replayable. A second request with the same `(agent_id, id)` while the first is still in progress returns HTTP 409 `STREAM_IN_PROGRESS` (Phase B). A completed stream returns the cached terminal events.
+- Hubs MUST enforce a per-chunk no-progress timeout of at least 30 s and a total stream timeout of at most 5 minutes.
+- Hubs MUST NOT internally buffer beyond OS kernel sockets — the path is true pass-through.
+
+**Cancellation.** Closing the agent → Hub connection MUST close the Hub → Provider connection. Hubs MUST charge for delivered output up to the disconnect using the action's flat `pricing.base` (Phase A) or accumulated `meter` totals (Phase B).
+
+### 4.4 Error Response
 
 See 03-errors.md for the complete error catalog. Error responses follow this structure:
 
