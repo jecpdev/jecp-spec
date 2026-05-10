@@ -66,11 +66,26 @@ Note: This is a per-call check in v1.0. Cumulative spend tracking is reserved fo
 #### `PROVENANCE_MISMATCH`
 
 - **HTTP**: 403
-- **Cause**: `mandate.provenance_hash` is invalid. Specific sub-causes:
-  - **v2 hash** (`"v2:..."` prefix): wire format malformed, timestamp outside ±300s clock-skew window, nonce reused (replay defense), or HMAC tag mismatch
-  - **v1 hash** (64 hex chars): SHA-256 input does not match server-computed value with the Agent's current `total_calls`
+- **Cause**: `mandate.provenance_hash` is invalid. The error response carries an OPTIONAL `details.subcause` field from the **closed registry** below. Hubs MAY omit `details.subcause`; if present, it MUST be one of the registered values. New values are added by spec patch only; clients MUST treat unknown subcauses as the parent code (`PROVENANCE_MISMATCH`).
 - **Retry-safe**: Yes (with a freshly-computed v2 hash and a fresh nonce)
-- **Recovery**: Generate a new v2 `provenance_hash` (see 02-authentication.md §5.2) using a fresh nonce and the current unix-seconds timestamp. v1 is deprecated (sunset 2026-08-01) and SHOULD NOT be used for new code; see 02-authentication.md §5.7 for migration timing.
+- **Recovery**: Generate a new v2 `provenance_hash` (see 02-authentication.md §5.2) using a fresh nonce and the current unix-seconds timestamp. v1 is deprecated (sunset 2026-11-01) and SHOULD NOT be used for new code; see 02-authentication.md §5.7 for migration timing.
+
+##### `details.subcause` registry (spec v1.0.1)
+
+| Subcause | Meaning | Recovery hint |
+|---|---|---|
+| `wire_malformed` | The `provenance_hash` value does not match the §4.2 regex (e.g. v2 missing prefix, bad timestamp parse, nonce shorter than 16 hex chars, non-hex nonce, missing HMAC tag, or v1 length ≠ 64). | Recompute via SDK helper (`computeProvenanceV2` / `verifyProvenanceV2` reject malformed wire client-side). |
+| `clock_skew` | v2 timestamp is outside the ±300s clock-skew window. Hub also returns `details.drift_seconds` (signed: `now − timestamp`). | Synchronize NTP on the Agent host. The window MUST NOT be widened by Hubs. |
+| `hmac_mismatch` | v2 HMAC tag does not match the value the Hub recomputed using `mandate.api_key`. | Confirm the api_key the Agent signs with is identical to the one in `mandate.api_key`. Common cause: stale rotation grace key. |
+| `nonce_replay` | The `(agent_id, nonce)` tuple was already seen in the past 600s. | Generate a fresh nonce (≥ 16 random hex chars) per request — never reuse. |
+| `v1_legacy_mismatch` | v1 SHA-256 hash does not match the server-recomputed value (Agent's `total_calls` is likely stale). | Migrate to v2; v1 cannot be made replay-safe. |
+| `v1_unavailable` | v1 was attempted on a rotated Agent — the Hub no longer stores the plaintext `api_key` prefix needed to recompute v1. | Migrate to v2 immediately (see 02-authentication.md §5.8 — the migration recipe). |
+
+The `details.documentation_url` field, when present, is a deep-link of the form `https://jecp.dev/errors/provenance_mismatch#<subcause>` and points to the same row in the catalog page.
+
+##### Subcause emission policy
+
+A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `api_key` against the stored credential (i.e., a request whose `X-API-Key` did not match the hashed credential MUST receive a generic `PROVENANCE_MISMATCH` without subcause). This prevents the subcause from acting as an enumeration oracle for unauthenticated callers.
 
 #### `INSUFFICIENT_TRUST`
 
