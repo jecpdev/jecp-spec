@@ -55,7 +55,7 @@ negative_cases:
   - description: HTTP (non-HTTPS) `hub_url` violates schema and MUST fail.
     expected_behavior: any hub_url not matching `^https://` rejects the document.
 
-  - description: `conformance_levels` empty array — schema minItems=1.
+  - description: "`conformance_levels` empty array — schema minItems=1."
     expected_behavior: empty conformance_levels rejects the document.
 
 reproducer_curl: |
