@@ -1,0 +1,93 @@
+id: JECP-WIRE-MUST-410-SUNSET
+level: MUST
+spec_section: "01-protocol §4.6 + 03-errors §3.3 (CAPABILITY_DEPRECATED)"
+description: >
+  POST /v1/invoke against a capability whose manifest declares a `sunset_at`
+  in the past (relative to the Hub's clock) MUST return HTTP 410 GONE +
+  JECP envelope error.code = "CAPABILITY_DEPRECATED" + RFC 8594 + IETF
+  Deprecation HTTP Header response headers:
+    - `Sunset:` IMF-fixdate (RFC 8594 §3) of manifest's sunset_at
+    - `Deprecation:` literal `true` (IETF Deprecation HTTP Header draft)
+    - `Link:` rel="deprecation" pointing at the spec's catalog page
+    - `Link:` rel="successor-version" when the manifest declares one
+
+# Conformance harness execution requires a fixture capability with
+# sunset_at in the past. The reference Hub seeds `jecp_test/deprecated-echo`
+# with sunset_at = "2020-01-01T00:00:00Z" specifically for this assertion.
+# Hubs that don't operate the JobDoneBot fixture MAY substitute their own
+# expired-capability and MUST document it.
+
+setup:
+  - description: ensure the jecp_test/deprecated-echo fixture exists
+    request:
+      method: GET
+      path:   /v1/capabilities?id=jecp_test/deprecated-echo
+    expected:
+      status: 200
+      body_jsonpath:
+        - { path: "$.capabilities[0].full_id", equals: "jecp_test/deprecated-echo" }
+        - { path: "$.capabilities[0].status",  equals: "sunset" }
+
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-410-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke the deprecated capability — MUST be 410 with required headers
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+  body: |
+    { "jecp": "1.0", "id": "conformance-410-${TS}",
+      "capability": "jecp_test/deprecated-echo", "action": "echo",
+      "input": { "msg": "test" },
+      "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
+                   "budget_usdc": 0.10 } }
+
+expected:
+  status: 410
+  headers:
+    Sunset:
+      present: true
+      format:  imf-fixdate
+      contains: "2020"            # the fixture's sunset_at year
+    Deprecation:
+      present: true
+      equals:  "true"
+    Link:
+      present: true
+      contains: 'rel="deprecation"'
+  body_jsonpath:
+    - { path: "$.jecp",                          equals: "1.0" }
+    - { path: "$.status",                        equals: "failed" }
+    - { path: "$.error.code",                    equals: "CAPABILITY_DEPRECATED" }
+    - { path: "$.error.details.capability",      equals: "jecp_test/deprecated-echo" }
+    - { path: "$.error.details.sunset_at",       contains: "2020-01-01" }
+    - { path: "$.error.details.documentation_url", contains: "/errors/capability_deprecated" }
+
+reproducer_curl: |
+  TS=$(date +%s)
+  REG=$(curl -sS -X POST https://jecp.dev/api/agents/register \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"conformance-410-$TS\",\"agent_type\":\"conformance\"}")
+  AID=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_id"])')
+  KEY=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+
+  curl -sS -i -X POST "https://jecp.dev/v1/invoke" \
+    -H "Content-Type: application/json" \
+    -d "{\"jecp\":\"1.0\",\"id\":\"$TS\",\"capability\":\"jecp_test/deprecated-echo\",\"action\":\"echo\",\"input\":{\"msg\":\"x\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}"
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc8594
+  - https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-deprecation-header
+  - https://jecp.dev/spec/v1.0/01-protocol.md#46-capability-sunset
+  - https://jecp.dev/spec/v1.0/03-errors.md#capability_deprecated
