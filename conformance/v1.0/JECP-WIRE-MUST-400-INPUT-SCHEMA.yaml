@@ -16,27 +16,39 @@ prerequisites:
   - description: a published, active capability whose manifest declares
       input_schema with at least one `required` field on the action.
     fixture_hint: |
-      The reference Hub uses `document-pipeline/generate-invoice` whose
-      input_schema requires `items` (array) and `client_name` (string).
+      The reference Hub uses `jobdonebot/document-pipeline/generate-invoice`
+      whose input_schema requires `items` (array) and `client_name` (string).
   - description: a registered agent + valid api_key with available budget.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-400-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
 
 request:
   method: POST
   path:   /v1/invoke
   headers:
     Content-Type: application/json
-    X-Agent-ID:   "{{AGENT_ID}}"
-    X-API-Key:    "{{API_KEY}}"
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
   body: |
     {
       "jecp": "1.0",
-      "id": "must-400-input-schema-{{NONCE}}",
-      "capability": "document-pipeline/generate-invoice",
+      "id": "must-400-input-schema-${TS}-${NONCE}",
+      "capability": "jobdonebot/document-pipeline",
       "action": "generate-invoice",
       "input": { "client_name": "ACME" },
       "mandate": {
-        "agent_id": "{{AGENT_ID}}",
-        "api_key":  "{{API_KEY}}",
+        "agent_id": "${agent_id}",
+        "api_key":  "${api_key}",
         "budget_usdc": 0.10
       }
     }

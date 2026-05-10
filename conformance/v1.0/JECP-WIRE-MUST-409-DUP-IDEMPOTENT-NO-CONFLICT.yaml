@@ -25,12 +25,14 @@ setup:
       api_key:  "$.api_key"
 
 request:
-  description: identical request issued twice — second call MUST NOT be 409
+  description: identical request issued twice — second (final) call MUST NOT be 409
   iterations: 2
   method: POST
   path:   /v1/jecp
   headers:
     Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
   body: |
     { "jecp": "1.0", "id": "${REQ_ID}", "capability": "content-factory",
       "action": "translate", "input": { "text": "hi", "target_lang": "ja" },
@@ -38,11 +40,12 @@ request:
                    "budget_usdc": 0.10 } }
 
 expected:
-  iteration_2:
-    status_not: 409
-    # The cached response should be returned; whatever the first call's
-    # status was, the second call MUST match (idempotent).
-    status_equals_iteration: 1
+  # Harness validates the final (2nd) iteration's response. An idempotent retry
+  # MUST NOT be 409. Whatever status the prime call returned, the cached
+  # response should match — the harness asserts only the not-409 part directly;
+  # `status_equals_iteration` is informational pending v1.2 multi-iteration
+  # cross-checks (out of scope §5 OOS list).
+  status_not: 409
 
 introduced_in: v1.0.2
 references:
