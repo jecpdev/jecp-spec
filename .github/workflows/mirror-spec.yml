@@ -1,0 +1,95 @@
+name: Mirror spec to website
+
+# Triggered on tag push (v1.0.x / v1.1.x / etc) or manual dispatch.
+# Clones jecp-spec at the tag, copies spec/ + adr/ + schemas/ to
+# jecpdev/website/public/spec/v{major.minor}/, opens a commit on website main
+# (Vercel auto-deploys → jecp.dev/spec/v1.0/* live).
+#
+# Required secret:
+#   WEBSITE_WRITE_TOKEN — PAT with `contents:write` on jecpdev/website.
+#                         Setup once: https://github.com/jecpdev/jecp-spec/settings/secrets/actions
+#
+# Each tag in this repo is the immutable source. The mirror is a deterministic
+# snapshot — re-running the workflow on the same tag produces the same output.
+
+on:
+  push:
+    tags:
+      - 'v1.*'
+      - 'v2.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Spec tag to mirror (e.g., v1.0.2). Defaults to the tag triggering the run.'
+        required: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout spec at tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Determine version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME:-}"
+          if [ -z "$TAG" ] && [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          fi
+          # v1.0.2 → v1.0; v1.1.0 → v1.1
+          BRANCH=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
+          # numeric form for path (no leading v): v1.0 → 1.0
+          PATH_VER="${BRANCH#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "branch_ver=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "path_ver=$PATH_VER" >> "$GITHUB_OUTPUT"
+          echo "Mirroring tag $TAG → /spec/$PATH_VER/"
+
+      - name: Clone website
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_WRITE_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::WEBSITE_WRITE_TOKEN secret is not configured."
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/jecpdev/website.git" \
+            target
+
+      - name: Sync spec, ADRs, schemas
+        run: |
+          DEST="target/public/spec/${{ steps.ver.outputs.path_ver }}"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          cp -r spec/* "$DEST/"
+          mkdir -p "$DEST/adr"
+          cp adr/*.md "$DEST/adr/" 2>/dev/null || true
+          mkdir -p "$DEST/schemas/v1"
+          cp schemas/v1/*.json "$DEST/schemas/v1/" 2>/dev/null || true
+          # Stamp the mirror with the source tag
+          echo "${{ steps.ver.outputs.tag }}" > "$DEST/.spec-tag"
+          ls -la "$DEST" | head -20
+
+      - name: Commit + push to website
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_WRITE_TOKEN }}
+        run: |
+          cd target
+          git config user.email "bot@jecp.dev"
+          git config user.name  "jecp-spec-bot"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to mirror — exiting cleanly."
+            exit 0
+          fi
+          git commit -m "chore: mirror jecp-spec ${{ steps.ver.outputs.tag }}"
+          git push origin HEAD:main
+
+      - name: Done
+        run: |
+          echo "✓ Mirror live at https://jecp.dev/spec/${{ steps.ver.outputs.path_ver }}/ within ~60s (Vercel auto-deploy)."

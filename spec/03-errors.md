@@ -113,9 +113,25 @@ A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `
 #### `VALIDATION_FAILED`
 
 - **HTTP**: 400
-- **Cause**: `input` does not conform to the action's published JSON Schema
-- **Retry-safe**: No (must fix input)
+- **Cause**: Envelope-level violation (missing `jecp`, malformed `id`, structurally invalid request body). For action-level input schema violations, see `INPUT_SCHEMA_VIOLATION` below.
+- **Retry-safe**: No (must fix request body)
 - **`details`**: `{ "errors": [{ "path": "<JSON pointer>", "reason": "<description>" }] }`
+
+#### `INPUT_SCHEMA_VIOLATION`
+
+- **HTTP**: 400
+- **Cause**: `input` is syntactically valid JSON and parses against the request envelope, but does not satisfy the action's published `input_schema` (04-manifest.md §5).
+- **Retry-safe**: No (must fix input)
+- **`details`**: `{ "errors": [{ "instance_path": "<JSON pointer to offending value>", "schema_path": "<JSON pointer to violated schema rule>", "reason": "<human-readable>" }], "schema_url": "https://<hub>/v1/capabilities/<id>#input_schema" }`
+- **Note**: `INPUT_SCHEMA_VIOLATION` (action-level) is distinct from `VALIDATION_FAILED` (envelope-level). Both are HTTP 400; the code distinguishes the layer where the violation occurred so SDKs can surface clearer diagnostics. New in spec v1.0.2.
+
+#### `UNSUPPORTED_MEDIA_TYPE`
+
+- **HTTP**: 415
+- **Cause**: Request `Content-Type` is not `application/json` (parameters such as `; charset=utf-8` are accepted). Empty / missing `Content-Type` is implementation-defined: Hubs MAY tolerate it for backward compatibility, but SHOULD log + warn. The streaming response negotiation (`Accept: text/event-stream`) is independent of request `Content-Type`.
+- **Retry-safe**: Yes (after fixing `Content-Type`)
+- **`details`**: `{ "received": "<value>", "expected": "application/json" }`
+- **Note**: New in spec v1.0.2.
 
 #### `INPUT_TOO_LARGE`
 
@@ -125,8 +141,8 @@ A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `
 
 #### `DUPLICATE_REQUEST`
 
-- **HTTP**: 409
-- **Cause**: A previous request with the same `id` and same Agent had different `input`, `capability`, or `action`
+- **HTTP**: 409 (per RFC 9110 §15.5.10 — request conflicts with existing idempotency state)
+- **Cause**: A previous request with the same `id` and same Agent recorded a different `input`, `capability`, or `action` within the idempotency window. Per spec §5, idempotent retries with identical payloads MUST return the cached response, not 409. 409 fires only on conflict (same id, different payload).
 - **Retry-safe**: No (use a new `id`)
 
 ### 3.3 Routing (4xx)
@@ -148,9 +164,15 @@ A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `
 #### `CAPABILITY_DEPRECATED`
 
 - **HTTP**: 410
-- **Cause**: The capability/action was removed or replaced
+- **Cause**: The capability/action's `sunset_at` (per its manifest, 04-manifest.md §5) is in the past relative to the Hub's clock.
 - **Retry-safe**: No
-- **`details`**: `{ "successor": "<capability/action>" }` (when available)
+- **`details`**: `{ "successor": "<capability/action>", "sunset_at": "<RFC 3339>" }` (when available)
+- **Headers (MUST)**: Hubs MUST attach the following per RFC 8594 (`Sunset`) and the IETF `Deprecation` HTTP Header draft:
+  - `Sunset: <IMF-fixdate>` — the manifest's `sunset_at` reformatted to IMF-fixdate.
+  - `Deprecation: true` — boolean form (NOT timestamp).
+  - `Link: <https://jecp.dev/spec/v1.0/03-errors.md#capability-deprecated>; rel="deprecation"`.
+  - `Link: <successor-capability-url>; rel="successor-version"` — when a successor is registered in the manifest.
+- **Pre-sunset notice**: Conformant Hubs MUST also attach the four headers above to **successful 2xx responses** for the 30 days preceding `sunset_at` (i.e., when `(sunset_at - now()) <= 30 days` and the request would otherwise succeed). Agents observe these headers as their migration alarm.
 
 #### `PROVIDER_NOT_FOUND`
 
@@ -182,8 +204,9 @@ A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `
 - **HTTP**: 429
 - **Cause**: Trust Tier rate limit exceeded (sliding 60s window)
 - **Retry-safe**: Yes (after `Retry-After` seconds)
-- **Headers**: `Retry-After: <seconds>`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
-- **`details`**: `{ "tier": "<bronze|silver|gold|platinum>", "limit_rpm": <int>, "reset_at": "<RFC 3339>" }`
+- **Headers (MUST)**: `Retry-After: <integer-seconds>` per RFC 9110 §10.2.3, integer form (delta-seconds, not HTTP-date). The value MUST be in `[1, 600]`; 0 is invalid.
+- **Headers (SHOULD)**: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (de-facto convention; reserved for v1.0.3 normative tightening)
+- **`details`**: `{ "tier": "<bronze|silver|gold|platinum>", "limit_rpm": <int>, "retry_after_seconds": <int>, "reset_at": "<RFC 3339>" }` — `retry_after_seconds` mirrors the header and is informational for clients that don't read response headers.
 
 ### 3.5.1 Streaming (4xx / SSE event)
 

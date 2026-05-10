@@ -6,6 +6,48 @@ The repository follows [SemVer](https://semver.org). Major versions break wire c
 
 ---
 
+## v1.0.2 — 2026-05-10 — Errata
+
+Backward-compatible patch release. Closes the four credibility-killers surfaced by the 7-agent panel review of v1.0.1 plus the ADR-0001 architecture artifact.
+
+### Endpoint reconciliation (K1)
+
+- **Canonical execution endpoint is `POST /v1/invoke`.** v1.0.0 / v1.0.1 contained an internal contradiction: §1, §2, §5, §9, §10 of 01-protocol referenced `/v1/jecp` while §4.3, §4.4 (streaming + composites) and 04§5.2 referenced `/v1/invoke`. The reference Hub ships `/v1/invoke`; v1.0.2 promotes it to canonical and demotes `/v1/jecp` to a legacy alias.
+- All occurrences of `/v1/jecp` in 00, 01 (§1, §2, §5, §9, §10), 02 §8, 05 §3 + §9 replaced with `/v1/invoke`. New 01-protocol §2.1 "Legacy alias" clause defines the alias contract; new §2.2 documents the migration for spec readers.
+- Wire compatibility preserved: Hubs MUST continue to accept `/v1/jecp` through the v1.x line and MUST attach `Deprecation: true` + `Sunset: Sat, 01 Jan 2028 00:00:00 GMT` + `Link: <…>; rel="deprecation"` response headers per RFC 8594. The legacy alias is removed at v2.0.
+
+### Wire-format MUSTs (K2 — five credibility fixes)
+
+- **HTTP 415 `UNSUPPORTED_MEDIA_TYPE`** (new code in 03-errors §3.2) — Hubs MUST return 415 when `Content-Type` is not `application/json` (parameters such as `;charset=utf-8` are accepted). 01-protocol §2 cross-references the new code.
+- **HTTP 409 `DUPLICATE_REQUEST`** (existing code; status was already 409 in v1.0.1, v1.0.2 strengthens the wording with RFC 9110 §15.5.10 citation and clarifies that 409 fires only on conflict, not on identical replays).
+- **HTTP 410 `CAPABILITY_DEPRECATED`** (new normative section 01-protocol §4.6 + 03-errors §3.3 hardening) — Hubs MUST attach `Sunset` (IMF-fixdate per RFC 8594), `Deprecation: true`, and `Link rel="deprecation"` response headers when serving deprecated capabilities, including a 30-day pre-sunset notice on successful 2xx responses.
+- **`Retry-After` MUST on 429 `RATE_LIMITED`** (03-errors §3.5 hardening) — Hubs MUST emit `Retry-After: <integer-seconds>` in `[1, 600]` per RFC 9110 §10.2.3. `X-RateLimit-Limit / -Remaining / -Reset` remain SHOULD (reserved for v1.0.3 normative tightening).
+- **HTTP 400 `INPUT_SCHEMA_VIOLATION`** (new code in 03-errors §3.2) — distinct from `VALIDATION_FAILED` (envelope-level): the new code identifies action-level input schema failures so SDKs can surface clearer diagnostics. `details.errors[]` carries `instance_path` + `schema_path` + `reason`.
+
+### Hub Discovery (K4)
+
+- **`/.well-known/agent-guide.json`** is now normative. New 05-discovery.md §4.5 makes the document MUST for conformant Hubs. Schema published at `schemas/v1/agent-guide.json` (JSON Schema 2020-12). Required fields: `version`, `last_updated`, `vendor_prefix`, `hub_name`, `hub_url`, `supported_capabilities`, `conformance_levels`, `register_endpoint`, `contact.support`.
+- **Spec mirror at `https://jecp.dev/spec/v1.0/*`** — every tagged release is mirrored to the website via GitHub Action (`.github/workflows/mirror-spec.yml`). Tag-pinned URLs serve `Cache-Control: public, max-age=31536000, immutable`. The mirror is the canonical immutable source consumed by the `Link rel="deprecation"` headers and the spec's `documentation_url` references.
+
+### Architecture decision artifact (K5)
+
+- **[ADR-0001 — Idempotency–Provenance Interaction](adr/0001-idempotency-provenance-interaction.md)** published. Documents the v1.0.1 H2 patch as a normative architecture decision: idempotency cache keys MUST include `mandate.provenance_hash`. Records the three alternatives we considered and rejected (Stripe-style key only, verify-on-miss-only, opaque provenance). Cross-referenced from 02-authentication §5.2.2.
+- ADR registry rules established: `adr/template.md`, `adr/README.md` index, `.github/workflows/adr-lint.yml` enforces required sections + CHANGELOG cross-link.
+
+### Reference implementation alignment (informative)
+
+- Hub `setsuna-jobdonebot.fly.dev` implements all v1.0.2 wire-format MUSTs in commits Phase-0/c2 through Phase-0/c7 (per `docs/jecp/PATH-TO-NO1.md`).
+- `@jecpdev/sdk` 0.7.1 ships RELEASE_NOTES referencing ADR-0001; no API change (SDK already pins `/v1/invoke` since 0.4.0).
+- `@jecpdev/cli` is unchanged.
+
+### Migration from v1.0.1
+
+- No wire-breaking changes. Existing clients that target `/v1/jecp` continue to function unchanged; they observe new `Deprecation` / `Sunset` headers as their migration alarm.
+- `INPUT_SCHEMA_VIOLATION` is a new code; clients MUST tolerate unknown error codes (per 03-errors §7) and may map them to the parent code class.
+- The `Retry-After` MUST and the K2.3 sunset-header MUST are hardenings of behavior the spec was previously silent on — Hubs that emit them already are conformant.
+
+---
+
 ## v1.0.0 — 2026-05-10 — Stable
 
 First non-draft release. Wire compatibility frozen for the v1.x line. Backward-compatible additions (M2/M3 in this release) live alongside the v0.x draft surface; nothing has been removed.

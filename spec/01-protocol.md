@@ -6,21 +6,39 @@
 
 ## 1. Abstract
 
-This document defines the wire format for JECP requests and responses. It specifies the JSON Schema for the `POST /v1/jecp` endpoint, including request structure, response structure, and streaming responses.
+This document defines the wire format for JECP requests and responses. It specifies the JSON Schema for the `POST /v1/invoke` endpoint, including request structure, response structure, and streaming responses.
 
 ## 2. Endpoint
 
-The primary execution endpoint is:
+The canonical execution endpoint is:
 
 ```
-POST {hub_origin}/v1/jecp
+POST {hub_origin}/v1/invoke
 ```
 
 Where `{hub_origin}` is the JECP Hub's HTTPS origin (e.g., `https://jecp.dev` or `https://setsuna-jobdonebot.fly.dev`).
 
 Hubs MUST serve this endpoint over HTTPS. Plain HTTP MUST NOT be used.
 
-The Hub MUST accept `Content-Type: application/json` and reject other content types with HTTP 415.
+The Hub MUST accept `Content-Type: application/json` (with optional `;charset=...` parameter) and MUST reject other content types with HTTP 415 `UNSUPPORTED_MEDIA_TYPE` (03-errors.md §3.2).
+
+### 2.1 Legacy alias
+
+The path `/v1/jecp` is a retained legacy alias. v1.0.0 and v1.0.1 of this specification published a contradiction (some sections referenced `/v1/jecp`, others `/v1/invoke`); v1.0.2 resolves the contradiction by promoting `/v1/invoke` to canonical and demoting `/v1/jecp` to a legacy alias.
+
+Conformant Hubs:
+
+- MUST accept `POST /v1/jecp` with semantics identical to `POST /v1/invoke` through the v1.x line.
+- MUST attach `Deprecation: true` and `Sunset: Sat, 01 Jan 2028 00:00:00 GMT` response headers to every response served via the `/v1/jecp` path (regardless of status code), per RFC 8594.
+- MUST attach `Link: <https://jecp.dev/spec/v1.0/01-protocol.md#21-legacy-alias>; rel="deprecation"` on the same responses.
+- MAY include `error.details.endpoint_alias = "/v1/jecp (legacy; use /v1/invoke)"` on error envelopes served via the alias.
+- MUST remove `/v1/jecp` at v2.0.
+
+The alias is scheduled for sunset on 2028-01-01.
+
+### 2.2 Migration note for spec readers
+
+v1.0.2 reconciles a v1.0.0/v1.0.1 contradiction. Both endpoints work on conformant Hubs through the v1.x line, but new code SHOULD use `/v1/invoke`. Tooling generated against v1.0.0 or v1.0.1 that targeted `/v1/jecp` continues to function unchanged — agents observe the new `Deprecation` / `Sunset` response headers as their migration signal (RFC 8594).
 
 ## 3. Request
 
@@ -334,9 +352,23 @@ See 03-errors.md for the complete error catalog. Error responses follow this str
 }
 ```
 
+### 4.6 Capability sunset
+
+When a capability or action carries a `sunset_at` field in its manifest (04-manifest.md §5 `deprecation.sunset_at`) and that timestamp is in the past relative to the Hub's clock, the Hub MUST reject invocations of that capability/action with HTTP 410 `CAPABILITY_DEPRECATED` (03-errors.md §3.3) and MUST attach a `Sunset` response header in IMF-fixdate form (RFC 8594 §3) with the manifest's sunset timestamp.
+
+Conformant Hubs MUST also attach:
+
+- `Deprecation: true` (boolean form per IETF Deprecation HTTP Header draft)
+- `Link: <https://jecp.dev/spec/v1.0/03-errors.md#capability-deprecated>; rel="deprecation"`
+- `Link: <successor-capability-url>; rel="successor-version"` when the manifest declares a `successor_version`
+
+These headers MUST also be attached to **successful 200 responses** for the 30 days preceding `sunset_at`, so Agents are notified before hard-fail. Specifically: if `(sunset_at - now()) <= 30 days` and the request would otherwise succeed, the Hub MUST attach the three headers to the 2xx response.
+
+Hubs SHOULD log every CAPABILITY_DEPRECATED rejection at INFO level so operators can track migration pressure on each deprecated capability.
+
 ## 5. Idempotency
 
-The Hub MUST implement idempotency for the `POST /v1/jecp` endpoint:
+The Hub MUST implement idempotency for the `POST /v1/invoke` endpoint (and the `/v1/jecp` legacy alias):
 
 1. Each request `id` is scoped to the authenticated `agent_id`.
 2. A successful response is cached for at least 24 hours.
@@ -379,7 +411,7 @@ The Hub MUST emit a `408 Request Timeout` if the client fails to send the body w
 
 Request:
 ```http
-POST /v1/jecp HTTP/1.1
+POST /v1/invoke HTTP/1.1
 Host: jecp.dev
 Content-Type: application/json
 X-Agent-ID: jdb_ag_abc123
@@ -464,7 +496,7 @@ Response includes `metadata` echoed back inside `result.metadata`.
 
 Request:
 ```http
-POST /v1/jecp HTTP/1.1
+POST /v1/invoke HTTP/1.1
 Accept: text/event-stream
 Content-Type: application/json
 X-Agent-ID: jdb_ag_abc123
@@ -533,7 +565,7 @@ This is v1.0 of the wire format. Future minor versions (v1.1+) MAY add optional 
 - Remove fields
 - Reuse field names with different semantics
 
-A Hub serving multiple major versions MUST namespace them by URL path (`/v1/jecp`, `/v2/jecp`).
+A Hub serving multiple major versions MUST namespace them by URL path (`/v1/invoke`, `/v2/invoke`). The legacy alias `/v1/jecp` is removed at v2.0; v2.x serves `/v2/invoke` only.
 
 ## 11. Authors
 

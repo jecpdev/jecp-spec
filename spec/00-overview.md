@@ -52,7 +52,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 │ Agent (consumer)                                         │
 │   - Holds API key                                       │
 │   - Issues Mandate (optional)                           │
-│   - Calls POST /v1/jecp                                 │
+│   - Calls POST /v1/invoke                               │
 └──────────────────────────┬──────────────────────────────┘
                            │ HTTPS
                            ▼
@@ -137,7 +137,7 @@ JECP explicitly does NOT aim to:
 JECP follows Semantic Versioning. The major version is reflected in the URL path:
 
 ```
-POST https://jecp.dev/v1/jecp     (this spec)
+POST https://jecp.dev/v1/invoke   (this spec)
 POST https://jecp.dev/v2/jecp     (future, when breaking changes ship)
 ```
 

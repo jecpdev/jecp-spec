@@ -236,6 +236,8 @@ When a Hub implements the §5.2 step 5 cache, the following requirements apply:
 
 #### 5.2.2 Idempotency vs Provenance interaction (informative)
 
+> See **[ADR-0001 — Idempotency–Provenance Interaction](../adr/0001-idempotency-provenance-interaction.md)** for the architecture decision rationale, the three alternatives we considered and rejected, and the wire-format guarantee this commits us to.
+
 Hubs implement two distinct but related caches: idempotency (§9.4) and Provenance replay defense (§5.2 step 5). Their interaction is non-obvious and easy to get wrong; conformant Hubs MUST follow this ordering:
 
 1. **Idempotency check fires first.** A request whose `id` is already in the idempotency cache returns the cached response without re-executing the handler. The cached response is returned regardless of whether the new request's `provenance_hash` matches the cached request's.
@@ -400,7 +402,7 @@ Full Provider authentication is specified in 04-manifest.md.
 
 ```
 Agent              Hub               Database
-  |  POST /v1/jecp   |                   |
+  |  POST /v1/invoke |                   |
   |----------------->|                   |
   |                  | Auth (API key)    |
   |                  |------------------>|
@@ -420,7 +422,7 @@ Agent              Hub               Database
 
 ```
 Agent              Hub               Database
-  |  POST /v1/jecp   |                   |
+  |  POST /v1/invoke |                   |
   |  + mandate       |                   |
   |----------------->|                   |
   |                  | Auth (mandate.api_key)|

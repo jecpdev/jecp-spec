@@ -1,0 +1,42 @@
+name: ADR lint
+
+on:
+  pull_request:
+    paths:
+      - 'adr/**'
+      - 'CHANGELOG.md'
+  push:
+    branches: [main]
+    paths:
+      - 'adr/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ADR template — required sections
+        run: bash scripts/check-adr-presence.sh
+
+      - name: ADR cross-link from CHANGELOG (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Every ADR added in this PR must be linked from CHANGELOG.md.
+          set -e
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}"... | grep -E '^adr/0[0-9]+-.*\.md$' || true)
+          if [ -z "$changed" ]; then
+            echo "no new ADRs in this PR — skipping cross-link check"
+            exit 0
+          fi
+          missing=0
+          while IFS= read -r f; do
+            base=$(basename "$f" .md)
+            if ! grep -qF "$base" CHANGELOG.md; then
+              echo "::error::ADR $base added but not referenced in CHANGELOG.md"
+              missing=$((missing+1))
+            fi
+          done <<< "$changed"
+          [ "$missing" -eq 0 ]

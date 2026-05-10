@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jecp.dev/schemas/v1/agent-guide.json",
+  "title": "JECP Hub Discovery Document",
+  "description": "Schema for /.well-known/agent-guide.json — Hub-published discovery + conformance manifest. See spec 05-discovery §4.5.",
+  "type": "object",
+  "required": [
+    "version",
+    "last_updated",
+    "vendor_prefix",
+    "hub_name",
+    "hub_url",
+    "supported_capabilities",
+    "conformance_levels",
+    "register_endpoint",
+    "contact"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Schema URI — clients SHOULD validate this document against it."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "JECP spec version this Hub claims conformance with (semver, e.g., '1.0.2')."
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp of the last modification of this document. Documents older than 7 days SHOULD be treated as stale by clients."
+    },
+    "vendor_prefix": {
+      "type": "string",
+      "pattern": "^[a-z]{2,8}$",
+      "description": "Lowercase 2-8 character vendor identifier used in this Hub's agent_id / api_key / provider_id strings (per 02-authentication §3.1)."
+    },
+    "hub_name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 100,
+      "description": "Human-readable Hub name (e.g., 'JobDoneBot Hub')."
+    },
+    "hub_operator": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Legal entity operating this Hub (e.g., 'Tufe Company Inc.'). Optional."
+    },
+    "hub_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "description": "Origin URL of this Hub (HTTPS required)."
+    },
+    "endpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "invoke":              { "type": "string", "format": "uri", "pattern": "^https://" },
+        "invoke_legacy_alias": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "capabilities":        { "type": "string", "format": "uri", "pattern": "^https://" },
+        "refunds":             { "type": "string", "format": "uri", "pattern": "^https://" },
+        "subscriptions":       { "type": "string", "format": "uri", "pattern": "^https://" },
+        "openapi":             { "type": "string", "format": "uri", "pattern": "^https://" },
+        "health":              { "type": "string", "format": "uri", "pattern": "^https://" }
+      },
+      "description": "Concrete endpoint URLs; complements `register_endpoint`. The canonical execution endpoint is `invoke`. `invoke_legacy_alias` (if present) points to the deprecated `/v1/jecp` path retained through v1.x."
+    },
+    "supported_capabilities": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)?$"
+      },
+      "description": "List of capability names (e.g., 'content-factory') or fully-qualified third-party capabilities (e.g., 'jobdonebot/streaming-test')."
+    },
+    "conformance_levels": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "Hub-Core",
+          "Hub-Streaming",
+          "Hub-Composite",
+          "Provider-API",
+          "SDK-Client"
+        ]
+      },
+      "description": "Conformance level claims. Verifiable via the Phase 2 conformance harness (`docker run ghcr.io/jecpdev/conformance:v1.x --target <hub_url>`)."
+    },
+    "replay_cache_mode": {
+      "enum": ["local", "redis", "disabled"],
+      "description": "Implementation strategy for the Provenance v2 nonce replay cache (see 02-authentication §5.2.1)."
+    },
+    "provenance_versions_supported": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["v1", "v2"] },
+      "description": "Which Provenance hash schemes the Hub verifies. v1 sunset 2026-11-01; new Hubs SHOULD ship v2 only."
+    },
+    "register_endpoint": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "description": "URL where new Agents register to obtain agent_id + api_key."
+    },
+    "contact": {
+      "type": "object",
+      "required": ["support"],
+      "additionalProperties": false,
+      "properties": {
+        "support":        { "type": "string", "description": "Email or URL for general support." },
+        "security":       { "type": "string", "description": "Email for vulnerability disclosure (often pairs with `/.well-known/security.txt`)." },
+        "security_txt":   { "type": "string", "format": "uri", "pattern": "^https://" },
+        "status_url":     { "type": "string", "format": "uri" }
+      }
+    },
+    "documentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "homepage":     { "type": "string", "format": "uri" },
+        "spec":         { "type": "string", "format": "uri", "description": "Frozen spec URL — typically https://<host>/spec/v1.0/" },
+        "quickstart":   { "type": "string", "format": "uri" },
+        "errors":       { "type": "string", "format": "uri", "description": "Public error catalog page (e.g., https://jecp.dev/errors)." },
+        "discussions":  { "type": "string", "format": "uri" }
+      }
+    },
+    "spec_version_pinned": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Exact spec patch this Hub is tested against (e.g., '1.0.2')."
+    },
+    "rate_limits_default_rpm": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1 },
+      "description": "Default per-tier rate limits (requests per minute) — informational for capacity planning."
+    },
+    "currencies_accepted": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z]{3,5}$" },
+      "description": "ISO 4217 + crypto extension codes the Hub accepts (e.g., ['USD','USDC'])."
+    },
+    "regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Fly.io / cloud regions this Hub serves from. Single-region Hubs disclose this honestly; multi-region Hubs list all primaries."
+    },
+    "trust_policy": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Open object describing the Hub's Trust Tier policy and Provenance enforcement."
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Open object for vendor-specific fields. Keys SHOULD use vendor namespace (e.g., 'x-jdb-foo')."
+    }
+  }
+}

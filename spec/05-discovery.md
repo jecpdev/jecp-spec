@@ -38,7 +38,7 @@ A2A-compatible Agent Card. Hubs MUST emit at minimum:
     "url": "<org url>"
   },
   "jecp": {
-    "endpoint": "<hub origin>/v1/jecp",
+    "endpoint": "<hub origin>/v1/invoke",
     "version": "1.0",
     "engine": "jecp",
     "capabilities_url": "<hub origin>/v1/capabilities",
@@ -232,7 +232,7 @@ Typical sequence for an Agent encountering JECP for the first time:
 2. POST /api/agent/register
    → obtains agent_id + api_key
 
-3. POST /v1/jecp                    (first execution)
+3. POST /v1/invoke                  (first execution)
    → if 401 INSUFFICIENT_TRUST, falls back to lower-tier
    → if 402 INSUFFICIENT_BALANCE, calls /api/agent/topup
 
