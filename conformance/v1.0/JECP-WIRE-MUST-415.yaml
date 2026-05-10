@@ -1,0 +1,72 @@
+id: JECP-WIRE-MUST-415
+level: MUST
+spec_section: "01-protocol §2 + 03-errors §3.2 (UNSUPPORTED_MEDIA_TYPE)"
+description: >
+  POST /v1/invoke with Content-Type: text/plain MUST return HTTP 415 +
+  JECP-envelope error.code = "UNSUPPORTED_MEDIA_TYPE" and
+  details.received = "text/plain", details.expected = "application/json".
+
+request:
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: text/plain
+  body: |
+    garbage-not-json
+
+expected:
+  status: 415
+  headers:
+    Content-Type:
+      present: true
+      contains: application/json
+  body_jsonpath:
+    - { path: "$.jecp",                          equals: "1.0" }
+    - { path: "$.status",                        equals: "failed" }
+    - { path: "$.error.code",                    equals: "UNSUPPORTED_MEDIA_TYPE" }
+    - { path: "$.error.details.received",        equals: "text/plain" }
+    - { path: "$.error.details.expected",        equals: "application/json" }
+    - { path: "$.error.details.documentation_url", contains: "/errors/unsupported_media_type" }
+
+negative_cases:
+  - description: missing Content-Type — MUST NOT be 415 (admiral D1 tolerate)
+    request:
+      method: POST
+      path:   /v1/invoke
+      body:   "{}"
+    expected:
+      status_not: 415
+
+  - description: application/json; charset=utf-8 — parameter is allowed
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: "application/json; charset=utf-8"
+      body: "{}"
+    expected:
+      status_not: 415
+
+  - description: legacy alias /v1/jecp ALSO enforces 415
+    request:
+      method: POST
+      path:   /v1/jecp
+      headers:
+        Content-Type: application/xml
+      body: "<x/>"
+    expected:
+      status: 415
+      body_jsonpath:
+        - { path: "$.error.code", equals: "UNSUPPORTED_MEDIA_TYPE" }
+
+reproducer_curl: |
+  curl -sS -w "\nHTTP=%{http_code}\n" -X POST \
+    "${TARGET:-https://jecp.dev}/v1/invoke" \
+    -H "Content-Type: text/plain" \
+    -d 'garbage'
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.16
+  - https://jecp.dev/spec/v1.0/01-protocol.md#2-endpoint
+  - https://jecp.dev/spec/v1.0/03-errors.md#unsupported_media_type
