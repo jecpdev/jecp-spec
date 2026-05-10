@@ -35,9 +35,8 @@ request:
     X-API-Key:    "${api_key}"
   body: |
     {
-      "name":            "conformance-ssrf-ip-${TS}",
-      "destination_url": "https://127.0.0.1/webhook",
-      "event_types":     ["invoke.completed"]
+      "endpoint_url": "https://127.0.0.1/webhook",
+      "events":       ["invoke.completed"]
     }
 
 expected:

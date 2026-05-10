@@ -11,7 +11,7 @@ description: >
   A/AAAA records resolve into deny ranges. The reference Hub uses the
   fixtures published at:
 
-    ssrf-loopback.jecp.dev   A 127.0.0.1
+    localtest.me   A 127.0.0.1
     ssrf-metadata.jecp.dev   A 169.254.169.254
     ssrf-rfc1918.jecp.dev    A 10.0.0.1
     ssrf-public.jecp.dev     A 1.1.1.1   (positive control — MUST NOT be rejected)
@@ -43,9 +43,8 @@ request:
     X-API-Key:    "${api_key}"
   body: |
     {
-      "name":            "conformance-ssrf-res-${TS}",
-      "destination_url": "https://ssrf-loopback.jecp.dev/webhook",
-      "event_types":     ["invoke.completed"]
+      "endpoint_url": "https://localtest.me/webhook",
+      "events":       ["invoke.completed"]
     }
 
 expected:
@@ -84,7 +83,7 @@ reproducer_curl: |
   curl -sS -w "\nHTTP=%{http_code}\n" -X POST https://setsuna-jobdonebot.fly.dev/v1/subscriptions \
     -H "Content-Type: application/json" \
     -H "X-Agent-ID: $AID" -H "X-API-Key: $KEY" \
-    -d "{\"name\":\"conformance-ssrf-res-$TS\",\"destination_url\":\"https://ssrf-loopback.jecp.dev/webhook\",\"event_types\":[\"invoke.completed\"]}"
+    -d "{\"name\":\"conformance-ssrf-res-$TS\",\"destination_url\":\"https://localtest.me/webhook\",\"event_types\":[\"invoke.completed\"]}"
 
 introduced_in: v1.1.0
 references:
