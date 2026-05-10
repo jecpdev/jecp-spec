@@ -1,0 +1,69 @@
+id: JECP-DISCOVERY-MUST-001
+level: MUST
+spec_section: "05-discovery §4 (`/.well-known/agent-guide.json`)"
+description: >
+  Conformant Hubs at v1.0.2 and later MUST publish a `/.well-known/agent-guide.json`
+  discovery document that satisfies the JSON Schema at
+  `https://jecp.dev/schemas/v1/agent-guide.json`. The document MUST be served
+  over HTTPS with `Content-Type: application/json` and Cache-Control
+  `max-age=300, must-revalidate`. All schema-required fields MUST be present:
+  `version`, `last_updated`, `vendor_prefix`, `hub_name`, `hub_url`,
+  `supported_capabilities`, `conformance_levels`, `register_endpoint`,
+  `contact` (with `contact.support` non-empty).
+
+request:
+  method: GET
+  path:   /.well-known/agent-guide.json
+
+expected:
+  status: 200
+  headers:
+    Content-Type:
+      present: true
+      contains: application/json
+    Cache-Control:
+      present: true
+      contains_all:
+        - max-age=300
+        - must-revalidate
+  body_jsonpath:
+    - { path: "$.version",                type: string, regex: '^\d+\.\d+\.\d+$' }
+    - { path: "$.last_updated",           type: string }
+    - { path: "$.vendor_prefix",          type: string, regex: '^[a-z]{2,8}$' }
+    - { path: "$.hub_name",               type: string }
+    - { path: "$.hub_url",                type: string, regex: '^https://' }
+    - { path: "$.supported_capabilities", type: array }
+    - { path: "$.conformance_levels",     type: array, minItems: 1 }
+    - { path: "$.register_endpoint",      type: string, regex: '^https://' }
+    - { path: "$.contact",                type: object }
+    - { path: "$.contact.support",        type: string }
+  body_jsonschema_ref: "https://jecp.dev/schemas/v1/agent-guide.json"
+
+negative_cases:
+  - description: 404 on `/.well-known/agent-guide.json` is a non-conformance signal.
+    note: |
+      SDKs (e.g. JecpClient.discover) treat 404 as a loud failure
+      (AgentGuideUnavailableError). Hubs claiming v1.0.2 conformance MUST
+      serve this document.
+
+  - description: Cache-Control without `must-revalidate` allows stale documents
+      to mask trust-policy or sunset changes.
+    expected_behavior: |
+      Implementations that omit `must-revalidate` (or set max-age too high)
+      fail this assertion even if the JSON body is otherwise valid.
+
+  - description: HTTP (non-HTTPS) `hub_url` violates schema and MUST fail.
+    expected_behavior: any hub_url not matching `^https://` rejects the document.
+
+  - description: `conformance_levels` empty array — schema minItems=1.
+    expected_behavior: empty conformance_levels rejects the document.
+
+reproducer_curl: |
+  curl -sS -i "${TARGET:-https://setsuna-jobdonebot.fly.dev}/.well-known/agent-guide.json" \
+    | head -30
+
+introduced_in: v1.0.2
+references:
+  - https://jecp.dev/spec/v1.0/05-discovery.md#4
+  - https://jecp.dev/schemas/v1/agent-guide.json
+  - https://datatracker.ietf.org/doc/html/rfc8615   # /.well-known/ URIs
