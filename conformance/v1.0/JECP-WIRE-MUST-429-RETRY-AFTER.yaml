@@ -1,0 +1,77 @@
+id: JECP-WIRE-MUST-429-RETRY-AFTER
+level: MUST
+spec_section: "03-errors §3.5 (RATE_LIMITED) + RFC 9110 §10.2.3"
+description: >
+  When an Agent exceeds its Trust-Tier rate limit (sliding 60s window),
+  the Hub MUST respond with HTTP 429 Too Many Requests + JECP-envelope
+  error.code = "RATE_LIMITED" + a `Retry-After` response header in
+  integer-seconds form (RFC 9110 §10.2.3), bounded to `[1, 600]`.
+
+  Body MAY mirror the value as `error.details.retry_after_seconds` so
+  clients that ignore HTTP response headers can still implement back-off.
+
+setup:
+  - description: register a fresh Bronze agent (rate limit 10 rpm)
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-429-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: burst N>limit invocations until 429
+  iterations: 15
+  stop_on_status: 429
+  method: POST
+  path:   /v1/jecp
+  headers:
+    Content-Type: application/json
+  body: |
+    { "jecp": "1.0", "id": "burst-${TS}-${ITERATION}", "capability": "content-factory",
+      "action": "translate", "input": { "text": "hi", "target_lang": "ja" },
+      "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
+                   "budget_usdc": 0.10 } }
+
+expected:
+  # The first request that returns 429 from the burst is the assertion target.
+  status: 429
+  headers:
+    Retry-After:
+      present: true
+      type: integer
+      min: 1
+      max: 600
+  body_jsonpath:
+    - { path: "$.jecp",                          equals: "1.0" }
+    - { path: "$.status",                        equals: "failed" }
+    - { path: "$.error.code",                    equals: "RATE_LIMITED" }
+    - { path: "$.error.details.retry_after_seconds", type: integer, min: 1, max: 600 }
+    - { path: "$.error.details.documentation_url",   contains: "/errors/rate_limited" }
+  invariant:
+    description: details.retry_after_seconds matches the Retry-After header value
+    assertion: "$.error.details.retry_after_seconds == headers['Retry-After']"
+
+reproducer_curl: |
+  TS=$(date +%s)
+  REG=$(curl -sS -X POST https://jecp.dev/api/agents/register \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"conformance-429-$TS\",\"agent_type\":\"conformance\"}")
+  AID=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_id"])')
+  KEY=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+
+  for i in $(seq 1 15); do
+    curl -sS -w "HTTP=%{http_code}\n" -X POST https://jecp.dev/v1/jecp \
+      -H "Content-Type: application/json" \
+      -d "{\"jecp\":\"1.0\",\"id\":\"burst-$i\",\"capability\":\"content-factory\",\"action\":\"translate\",\"input\":{\"text\":\"hi\",\"target_lang\":\"ja\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}" \
+      -o /dev/null
+  done
+  # On 429 the response includes 'Retry-After: <seconds>' (1..=600).
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
+  - https://jecp.dev/spec/v1.0/03-errors.md#rate_limited
