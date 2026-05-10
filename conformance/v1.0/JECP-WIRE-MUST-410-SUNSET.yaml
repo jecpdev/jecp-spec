@@ -12,20 +12,20 @@ description: >
     - `Link:` rel="successor-version" when the manifest declares one
 
 # Conformance harness execution requires a fixture capability with
-# sunset_at in the past. The reference Hub seeds `jecp_test/deprecated-echo`
+# sunset_at in the past. The reference Hub seeds `jecp-test/deprecated-echo`
 # with sunset_at = "2020-01-01T00:00:00Z" specifically for this assertion.
 # Hubs that don't operate the JobDoneBot fixture MAY substitute their own
 # expired-capability and MUST document it.
 
 setup:
-  - description: ensure the jecp_test/deprecated-echo fixture exists
+  - description: ensure the jecp-test/deprecated-echo fixture exists
     request:
       method: GET
-      path:   /v1/capabilities?id=jecp_test/deprecated-echo
+      path:   /v1/capabilities?id=jecp-test/deprecated-echo
     expected:
       status: 200
       body_jsonpath:
-        - { path: "$.capabilities[0].full_id", equals: "jecp_test/deprecated-echo" }
+        - { path: "$.capabilities[0].full_id", equals: "jecp-test/deprecated-echo" }
         - { path: "$.capabilities[0].status",  equals: "sunset" }
 
   - description: register a fresh agent
@@ -47,7 +47,7 @@ request:
     Content-Type: application/json
   body: |
     { "jecp": "1.0", "id": "conformance-410-${TS}",
-      "capability": "jecp_test/deprecated-echo", "action": "echo",
+      "capability": "jecp-test/deprecated-echo", "action": "echo",
       "input": { "msg": "test" },
       "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
                    "budget_usdc": 0.10 } }
@@ -69,7 +69,7 @@ expected:
     - { path: "$.jecp",                          equals: "1.0" }
     - { path: "$.status",                        equals: "failed" }
     - { path: "$.error.code",                    equals: "CAPABILITY_DEPRECATED" }
-    - { path: "$.error.details.capability",      equals: "jecp_test/deprecated-echo" }
+    - { path: "$.error.details.capability",      equals: "jecp-test/deprecated-echo" }
     - { path: "$.error.details.sunset_at",       contains: "2020-01-01" }
     - { path: "$.error.details.documentation_url", contains: "/errors/capability_deprecated" }
 
@@ -83,7 +83,7 @@ reproducer_curl: |
 
   curl -sS -i -X POST "https://jecp.dev/v1/invoke" \
     -H "Content-Type: application/json" \
-    -d "{\"jecp\":\"1.0\",\"id\":\"$TS\",\"capability\":\"jecp_test/deprecated-echo\",\"action\":\"echo\",\"input\":{\"msg\":\"x\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}"
+    -d "{\"jecp\":\"1.0\",\"id\":\"$TS\",\"capability\":\"jecp-test/deprecated-echo\",\"action\":\"echo\",\"input\":{\"msg\":\"x\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}"
 
 introduced_in: v1.0.2
 references:
