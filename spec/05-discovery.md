@@ -64,7 +64,7 @@ This is the canonical "manual for AI agents". A single GET request returns every
 
 ```json
 {
-  "$schema": "https://jecp.dev/schemas/agent-guide-v1.json",
+  "$schema": "https://jecp.dev/schemas/v1/agent-guide.json",
   "version": "1.0.0",
   "last_updated": "<RFC 3339 date>",
   "audience": "AI agents",
@@ -102,6 +102,25 @@ All other sections are RECOMMENDED for richness but optional. Agents MUST gracef
 ### 4.4 Update Frequency
 
 The Hub MUST refresh content within 30 minutes of capability changes. Cache headers SHOULD be `public, max-age=1800, s-maxage=3600`.
+
+### 4.5 Conformance
+
+Conformant Hubs at v1.0.2 and later **MUST** publish a `/.well-known/agent-guide.json` document that satisfies the JSON Schema at `https://jecp.dev/schemas/v1/agent-guide.json` (a frozen mirror of [`schemas/v1/agent-guide.json`](../schemas/v1/agent-guide.json) in this repository). The document MUST include, at minimum:
+
+- `version` — the JECP spec version this Hub claims conformance with (e.g., `"1.0.2"`).
+- `last_updated` — RFC 3339 timestamp; documents older than 7 days SHOULD be treated as stale by clients.
+- `vendor_prefix` — the lowercase 2-8 character prefix used in this Hub's `agent_id` / `api_key` strings (per 02-authentication.md §3.1).
+- `hub_name`, `hub_url`.
+- `supported_capabilities` — list of capability names served by this Hub.
+- `conformance_levels` — one or more of `Hub-Core | Hub-Streaming | Hub-Composite | Provider-API | SDK-Client`.
+- `register_endpoint` — URL where new Agents register.
+- `contact.support` — operator support contact.
+
+Agents MAY rely on this document to validate ID formats, choose feature paths, and locate the registration endpoint. SDKs SHOULD ship a `discover(hub_origin)` helper that fetches and validates the document against the schema, surfacing a loud error (e.g., `AgentGuideUnavailableError`) when the URL returns 404 — Hubs that omit `/.well-known/agent-guide.json` are non-conformant from v1.0.2 forward.
+
+The schema is open (`additionalProperties: true` on the root) so vendors MAY extend the document with `extensions.<vendor-prefix>-<key>` fields without violating conformance.
+
+Hubs MUST update `/.well-known/agent-guide.json` whenever any normative field changes (e.g., a new `supported_capability`, a `conformance_levels` claim added or dropped, a `register_endpoint` migration). The 30-minute refresh budget in §4.4 applies.
 
 ## 5. `/llms.txt`
 

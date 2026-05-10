@@ -312,7 +312,7 @@ v1 has no timestamp or nonce binding, so it provides no replay defense beyond `m
 | Date | Conformance Requirement |
 |------|------------------------|
 | 2026-05-10 | v1.0 stable published. Hubs MUST implement v2 verification within 30 days of v1.0 release. SDKs SHOULD ship `computeProvenanceV2` helpers. |
-| 2026-08-01 | Hubs MUST attach `Deprecation: true`, `Sunset: Sat, 01 Nov 2026 00:00:00 GMT`, and `Link: <https://jecp.dev/spec/v1.0/02-authentication.md#5.7>; rel="deprecation"` response headers when an invocation succeeds with a v1 hash, so Agents are notified to upgrade. Hubs MAY attach these headers earlier (the reference Hub ships the implementation in v1.0.1 behind a feature flag, defaulting off until the date below). The `Sunset` value MUST be the IMF-fixdate form per RFC 8594 §3; `Deprecation` MUST be the literal `true` per the IETF `Deprecation` HTTP Header draft (NOT the timestamp form). |
+| 2026-08-01 | Hubs MUST attach `Deprecation: true`, `Sunset: Sat, 01 Nov 2026 00:00:00 GMT`, and `Link: <https://jecp.dev/spec/v1.0/02-authentication.md#57-sunset-schedule-for-v1>; rel="deprecation"` response headers when an invocation succeeds with a v1 hash, so Agents are notified to upgrade. Hubs MAY attach these headers earlier (the reference Hub ships the implementation in v1.0.1 behind a feature flag, defaulting off until the date below). The `Sunset` value MUST be the IMF-fixdate form per RFC 8594 §3; `Deprecation` MUST be the literal `true` per the IETF `Deprecation` HTTP Header draft (NOT the timestamp form). |
 | 2026-11-01 | Hubs MUST reject v1 wire format with `PROVENANCE_MISMATCH`. v1 verifiers MAY be removed from implementations. |
 
 ### 5.8 Migrating from v1 to v2 (informative)
