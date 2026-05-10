@@ -514,6 +514,86 @@ Hubs MAY maintain an additional explicit allowlist of public Provider domains fo
 
 Conformant Hubs SHOULD log SSRF attempts (URLs that hit the deny list) with sufficient detail to detect coordinated probing.
 
+### 9.7.1 Composite enforcement (v1.0.2 errata, normative)
+
+This section specifies the wire-format requirements for SSRF defense. Hubs claiming v1.0.2 (or later) conformance MUST implement the controls below. v1.1.0 ships the reference implementation in `protocol/url_guard.rs`; ADR-0002 records the architecture decision.
+
+#### 9.7.1.1 Validation pipeline
+
+For every Agent-controlled URL the Hub dereferences, the Hub MUST run the following pipeline IN ORDER. Stopping at the first rejection is RECOMMENDED for performance; rejecting on the strictest signal is REQUIRED for correctness.
+
+1. **Parse**. The URL MUST parse per RFC 3986. Malformed URLs MUST be rejected.
+2. **Scheme allowlist**. The scheme MUST be `https` in production. Hubs MAY permit `http` only when the Hub operator explicitly opts in for testing (e.g., `JECP_TEST_MODE=true` env flag, never toggleable via API).
+3. **Host syntax**. The host MUST be either a registered domain name (RFC 1123) or an IP literal. Percent-encoded hosts (e.g., `%31%32%37.0.0.1` for `127.0.0.1`) MUST be normalized before deny-list comparison.
+4. **DNS resolve**. The Hub MUST resolve the host via the system resolver (or an equivalent). If resolution returns more than one address, every returned address MUST be checked against the deny CIDRs in §9.7.
+5. **Deny-list check**. If any resolved address falls in any deny CIDR, the Hub MUST reject the URL.
+6. **Pin**. The Hub MUST `connect()` to the SAME address it checked. Implementations SHOULD use `reqwest::Client::resolve(host, addr)` (Rust) or equivalent to override the resolver for the request lifetime. Re-resolving between check and `connect()` allows DNS-rebinding bypass.
+7. **No redirects**. Outbound clients MUST NOT follow HTTP redirects automatically. Each redirect target is a NEW Agent-controlled URL that MUST run through this pipeline before being followed. Implementations SHOULD disable redirects (`Policy::none()`) and surface them to the caller for explicit re-validation.
+
+#### 9.7.1.2 Required deny CIDRs
+
+The minimum deny set for IPv4 + IPv6:
+
+```
+0.0.0.0/8           # "any" / unspecified
+10.0.0.0/8          # RFC 1918
+127.0.0.0/8         # Loopback (covers 127.0.0.1)
+169.254.0.0/16      # Link-local (AWS / GCP / Azure metadata at 169.254.169.254)
+172.16.0.0/12       # RFC 1918
+192.168.0.0/16      # RFC 1918
+::1/128             # IPv6 loopback
+fe80::/10           # IPv6 link-local
+fc00::/7            # IPv6 ULA (RFC 4193)
+::ffff:0.0.0.0/96   # IPv4-mapped IPv6 (catches ::ffff:127.0.0.1)
+```
+
+Hubs MAY extend this set with operator-specific CIDRs (e.g., the Hub's own VPC CIDR).
+
+#### 9.7.1.3 `URL_BLOCKED_SSRF` wire-format error
+
+When the Hub rejects an Agent-controlled URL, it MUST return the JECP envelope below (regardless of whether the rejection happens at register-time, at deref-time, or during webhook delivery):
+
+```json
+{
+  "jecp":   "1.0",
+  "status": "failed",
+  "error": {
+    "code":    "URL_BLOCKED_SSRF",
+    "message": "URL blocked by SSRF policy",
+    "details": {
+      "field":             "<endpoint_url | callback_url | webhook_destination_url>",
+      "blocked_url":       "<the URL the Hub rejected, with credentials redacted>",
+      "reason":            "<scheme | host_syntax | resolved_to_deny_cidr | parse_error>",
+      "documentation_url": "https://jecp.dev/errors/url_blocked_ssrf"
+    }
+  }
+}
+```
+
+HTTP status: **422 Unprocessable Entity** (the URL is structurally a valid HTTP URL but violates Hub policy).
+
+For asynchronous deref paths (webhook delivery, scheduled retries), the Hub MUST mark the queued row as abandoned with the same reason rather than retrying indefinitely.
+
+#### 9.7.1.4 Audit logging (RECOMMENDED)
+
+Hubs SHOULD persist every rejection in an `ssrf_attempts` audit table with:
+
+- `timestamp`
+- `agent_id` (or `provider_id` if the URL came from a Provider register / DNS-verify path)
+- `field_name` (which URL field carried the blocked value)
+- `blocked_url` (with credentials redacted)
+- `reason`
+
+The audit log enables correlation across actors during a coordinated probing window.
+
+#### 9.7.1.5 Conformance assertions
+
+The reference v1.0 conformance suite in `conformance/v1.0/` ships three MUST assertions for §9.7.1:
+
+- `JECP-OPS-MUST-SSRF-DENY-IP-LITERAL` — register/subscribe with deny-CIDR IP literal returns 422 `URL_BLOCKED_SSRF`.
+- `JECP-OPS-MUST-SSRF-DENY-RESOLVED` — hostname whose A/AAAA falls in a deny CIDR rejected at deref time.
+- `JECP-OPS-MUST-SSRF-PIN-RESOLVED-IP` — TTL-1 toggle resolver fixture; Hub MUST connect to the pinned (validated) address.
+
 ## 10. References
 
 - [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119)
