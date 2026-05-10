@@ -1,0 +1,80 @@
+id: JECP-WIRE-MUST-409-DUP-DIFFERENT-INPUT
+level: MUST
+spec_section: "01-protocol §5 + 03-errors §3.2 (DUPLICATE_REQUEST)"
+description: >
+  Same (agent_id, request_id) reused within the 24h idempotency window with
+  a DIFFERENT (capability, action, input, provenance_hash) tuple MUST return
+  HTTP 409 + JECP envelope error.code = "DUPLICATE_REQUEST". Per RFC 9110
+  §15.5.10 (409 Conflict).
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register   # served by jecp.dev Next.js, not /v1
+      headers:
+        Content-Type: application/json
+      body: |
+        { "name": "conformance-409-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: prime the idempotency cache with id=${REQ_ID} input=A
+    request:
+      method: POST
+      path:   /v1/jecp
+      headers:
+        Content-Type: application/json
+      body: |
+        { "jecp": "1.0", "id": "${REQ_ID}", "capability": "content-factory",
+          "action": "translate", "input": { "text": "hi", "target_lang": "ja" },
+          "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
+                       "budget_usdc": 0.10 } }
+    expected:
+      # First call may be 200 / 402 (free tier) or other non-error; we don't gate.
+      status_lt: 500
+
+request:
+  description: same id, DIFFERENT input → 409
+  method: POST
+  path:   /v1/jecp
+  headers:
+    Content-Type: application/json
+  body: |
+    { "jecp": "1.0", "id": "${REQ_ID}", "capability": "content-factory",
+      "action": "translate", "input": { "text": "ALTERED", "target_lang": "ja" },
+      "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
+                   "budget_usdc": 0.10 } }
+
+expected:
+  status: 409
+  body_jsonpath:
+    - { path: "$.jecp",                          equals: "1.0" }
+    - { path: "$.status",                        equals: "failed" }
+    - { path: "$.error.code",                    equals: "DUPLICATE_REQUEST" }
+    - { path: "$.error.details.documentation_url", contains: "/errors/duplicate_request" }
+
+reproducer_curl: |
+  TS=$(date +%s); REQ_ID="conformance-409-${TS}"
+  REG=$(curl -sS -X POST https://jecp.dev/api/agents/register \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"$REQ_ID\",\"agent_type\":\"conformance\"}")
+  AID=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_id"])')
+  KEY=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+
+  # 1) Prime
+  curl -sS -X POST "https://jecp.dev/v1/jecp" -H "Content-Type: application/json" \
+    -d "{\"jecp\":\"1.0\",\"id\":\"$REQ_ID\",\"capability\":\"content-factory\",\"action\":\"translate\",\"input\":{\"text\":\"hi\",\"target_lang\":\"ja\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}"
+
+  # 2) Replay with different input → expect 409
+  curl -sS -w "\nHTTP=%{http_code}\n" -X POST "https://jecp.dev/v1/jecp" \
+    -H "Content-Type: application/json" \
+    -d "{\"jecp\":\"1.0\",\"id\":\"$REQ_ID\",\"capability\":\"content-factory\",\"action\":\"translate\",\"input\":{\"text\":\"ALTERED\",\"target_lang\":\"ja\"},\"mandate\":{\"agent_id\":\"$AID\",\"api_key\":\"$KEY\",\"budget_usdc\":0.10}}"
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.10
+  - https://jecp.dev/spec/v1.0/01-protocol.md#5-idempotency
+  - https://jecp.dev/spec/v1.0/03-errors.md#duplicate_request
+  - https://jecp.dev/spec/v1.0/adr/0001-idempotency-provenance-interaction.md

@@ -1,0 +1,51 @@
+id: JECP-WIRE-MUST-409-DUP-IDEMPOTENT-NO-CONFLICT
+level: MUST
+spec_section: "01-protocol §5 + ADR-0001 (Idempotency-Provenance Interaction)"
+description: >
+  Same (agent_id, request_id) reused with IDENTICAL (capability, action,
+  input, provenance_hash) MUST return the cached response (idempotent hit),
+  NOT 409. This is the negative complement of JECP-WIRE-MUST-409-DUP-DIFFERENT-INPUT.
+
+  An idempotent retry returning 409 would be a wire-format violation: it
+  would force agents to think the Hub forgot the prior successful execution
+  every time the network drops a response — exactly the case idempotency
+  was designed to handle.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers:
+        Content-Type: application/json
+      body:   |
+        { "name": "conformance-409-neg-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: identical request issued twice — second call MUST NOT be 409
+  iterations: 2
+  method: POST
+  path:   /v1/jecp
+  headers:
+    Content-Type: application/json
+  body: |
+    { "jecp": "1.0", "id": "${REQ_ID}", "capability": "content-factory",
+      "action": "translate", "input": { "text": "hi", "target_lang": "ja" },
+      "mandate": { "agent_id": "${agent_id}", "api_key": "${api_key}",
+                   "budget_usdc": 0.10 } }
+
+expected:
+  iteration_2:
+    status_not: 409
+    # The cached response should be returned; whatever the first call's
+    # status was, the second call MUST match (idempotent).
+    status_equals_iteration: 1
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-9.2.2
+  - https://jecp.dev/spec/v1.0/01-protocol.md#5-idempotency
+  - https://jecp.dev/spec/v1.0/adr/0001-idempotency-provenance-interaction.md
