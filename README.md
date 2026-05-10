@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-stable-brightgreen.svg)](https://jecp.dev/spec)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://jecp.dev/spec)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://jecp.dev/spec)
 [![npm](https://img.shields.io/npm/v/@jecpdev/sdk?label=%40jecpdev%2Fsdk)](https://www.npmjs.com/package/@jecpdev/sdk)
 
 ---
@@ -86,7 +86,14 @@ curl -X POST https://jecp.dev/v1/invoke \
 
 ## Status
 
-**v1.0.0 — Stable** (May 2026). Backwards-compatible additions ship as v1.x; breaking changes will require v2.0.
+**v1.0.2 — Stable** (May 2026). Backwards-compatible additions ship as v1.x; breaking changes will require v2.0.
+
+v1.0.2 (Phase 0 errata, 2026-05-10):
+- **K1** endpoint reconciliation — `/v1/invoke` canonical, `/v1/jecp` retained legacy alias with RFC 8594 `Deprecation` / `Sunset` headers (sunset 2026-11-01).
+- **K2** wire-format MUSTs — HTTP 415 `UNSUPPORTED_MEDIA_TYPE`, HTTP 409 `DUPLICATE_REQUEST`, HTTP 410 `CAPABILITY_DEPRECATED` + Sunset/Deprecation/Link, HTTP 429 `RATE_LIMITED` + `Retry-After`, HTTP 400 `INPUT_SCHEMA_VIOLATION`.
+- **K3** in-process bulkhead — invoke / read / provider / background pools observable at `/health.pool_assignments`; saturation on one pool MUST NOT starve another.
+- **K4.1** discovery — `/.well-known/agent-guide.json` MUST per `schemas/v1/agent-guide.json` (K4.2 spec mirror to jecpdev/website deferred to v1.1).
+- **K5 / ADR-0001** — idempotency cache key MUST include `mandate.provenance_hash`; same `(agent_id, request_id)` with different provenance ⇒ HTTP 409 (not silent overwrite).
 
 ## Get involved
 
