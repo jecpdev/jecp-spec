@@ -1,0 +1,129 @@
+id: JECP-WIRE-MUST-400-INPUT-SCHEMA
+level: MUST
+spec_section: "01-protocol §4.5 + 03-errors §3.2 (INPUT_SCHEMA_VIOLATION)"
+description: >
+  When a manifest declares `input_schema` for an action, POST /v1/invoke with
+  an `input` payload that violates the schema MUST return HTTP 400 + JECP
+  envelope error.code = "INPUT_SCHEMA_VIOLATION" and details.errors[] carrying
+  per-violation { instance_path, schema_path, reason } objects. The Hub MUST
+  enforce validation BEFORE pricing resolution and BEFORE wallet deduction —
+  a violator MUST NOT be charged.
+
+  When the manifest does NOT declare input_schema for the action, validation
+  is a graceful pass (preserves backward compat for pre-v1.0.2 manifests).
+
+prerequisites:
+  - description: a published, active capability whose manifest declares
+      input_schema with at least one `required` field on the action.
+    fixture_hint: |
+      The reference Hub uses `document-pipeline/generate-invoice` whose
+      input_schema requires `items` (array) and `client_name` (string).
+  - description: a registered agent + valid api_key with available budget.
+
+request:
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "{{AGENT_ID}}"
+    X-API-Key:    "{{API_KEY}}"
+  body: |
+    {
+      "jecp": "1.0",
+      "id": "must-400-input-schema-{{NONCE}}",
+      "capability": "document-pipeline/generate-invoice",
+      "action": "generate-invoice",
+      "input": { "client_name": "ACME" },
+      "mandate": {
+        "agent_id": "{{AGENT_ID}}",
+        "api_key":  "{{API_KEY}}",
+        "budget_usdc": 0.10
+      }
+    }
+
+expected:
+  status: 400
+  headers:
+    Content-Type:
+      present: true
+      contains: application/json
+  body_jsonpath:
+    - { path: "$.jecp",                              equals: "1.0" }
+    - { path: "$.status",                            equals: "failed" }
+    - { path: "$.error.code",                        equals: "INPUT_SCHEMA_VIOLATION" }
+    - { path: "$.error.details.errors",              type:   array }
+    - { path: "$.error.details.errors[0].instance_path", type: string }
+    - { path: "$.error.details.errors[0].schema_path",   type: string }
+    - { path: "$.error.details.errors[0].reason",        type: string }
+    - { path: "$.error.details.documentation_url",   contains: "/errors/input_schema_violation" }
+
+negative_cases:
+  - description: wrong type for required field — MUST also be 400 + INPUT_SCHEMA_VIOLATION
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "{{AGENT_ID}}"
+        X-API-Key:    "{{API_KEY}}"
+      body: |
+        {
+          "jecp": "1.0",
+          "id": "must-400-wrong-type-{{NONCE}}",
+          "capability": "document-pipeline/generate-invoice",
+          "action": "generate-invoice",
+          "input": { "client_name": 42, "items": [] },
+          "mandate": {
+            "agent_id": "{{AGENT_ID}}",
+            "api_key":  "{{API_KEY}}",
+            "budget_usdc": 0.10
+          }
+        }
+    expected:
+      status: 400
+      body_jsonpath:
+        - { path: "$.error.code", equals: "INPUT_SCHEMA_VIOLATION" }
+
+  - description: capability without input_schema for the action — graceful pass,
+      MUST NOT 400 INPUT_SCHEMA_VIOLATION (validation skipped).
+    note: |
+      Pre-v1.0.2 manifests may not declare per-action input_schema. The Hub
+      MUST treat absent input_schema as "no constraints" rather than rejecting.
+    expected_behavior: status_not_400_input_schema_violation
+
+  - description: wallet MUST NOT be debited on schema rejection
+    note: |
+      Implementations MUST place schema validation BEFORE wallet deduction
+      so violators don't pay. The reproducer test asserts this by checking
+      wallet.balance before/after — it must remain identical.
+    expected_behavior: wallet_balance_unchanged
+
+reproducer_curl: |
+  # Replace AID, KEY, NONCE with real values; capability must declare input_schema.
+  AID="agt_xxx"
+  KEY="sk_xxx"
+  NONCE="$(date +%s)"
+  curl -sS -w "\nHTTP=%{http_code}\n" -X POST \
+    "${TARGET:-https://jecp.dev}/v1/invoke" \
+    -H "Content-Type: application/json" \
+    -H "X-Agent-ID: $AID" \
+    -H "X-API-Key:  $KEY" \
+    -d "{
+      \"jecp\": \"1.0\",
+      \"id\": \"reproducer-${NONCE}\",
+      \"capability\": \"document-pipeline/generate-invoice\",
+      \"action\": \"generate-invoice\",
+      \"input\": { \"client_name\": \"ACME\" },
+      \"mandate\": {
+        \"agent_id\": \"$AID\",
+        \"api_key\":  \"$KEY\",
+        \"budget_usdc\": 0.10
+      }
+    }"
+
+introduced_in: v1.0.2
+references:
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.1   # 400 Bad Request
+  - https://json-schema.org/draft/2020-12/release-notes              # JSON Schema 2020-12
+  - https://jecp.dev/spec/v1.0/01-protocol.md#45-input-schema
+  - https://jecp.dev/spec/v1.0/03-errors.md#input_schema_violation
