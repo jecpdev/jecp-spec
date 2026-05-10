@@ -216,7 +216,7 @@ extensions: { ... }           # Vendor-specific
         "currency": {
           "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, CAD, AUD, CHF, KRW, SGD, HKD, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). The literal 'both' is retained for backward compatibility with v1.0-draft Providers and means USD+USDC; new Providers SHOULD pick a single concrete currency.",
           "type": "string",
-          "pattern": "^([A-Z]{3}|both)$"
+          "pattern": "^([A-Z]{3,5}|both)$"
         },
         "model":    { "enum": ["flat", "per_call", "per_token", "per_chunk", "per_second", "tiered"] },
         "input_per_token_usdc":  { "type": "number", "minimum": 0 },
@@ -261,9 +261,9 @@ extensions: { ... }           # Vendor-specific
       "type": "object",
       "properties": {
         "payout_currency": {
-          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). MUST be a currency that the Hub's underlying payment processor (e.g., Stripe Connect for fiat, on-chain settlement for crypto) supports for the Provider's registered country.",
+          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). MUST be a currency that the Hub's underlying payment processor (e.g., Stripe Connect for fiat, on-chain settlement for crypto) supports for the Provider's registered country. Hubs MUST further restrict acceptance to a closed list of supported currencies (the regex is permissive intentionally — closed-list enforcement is Hub-side per §6.1).",
           "type": "string",
-          "pattern": "^[A-Z]{3,5}$"
+          "pattern": "^([A-Z]{3,5}|both)$"
         },
         "stripe_connect_required": { "type": "boolean" }
       }
