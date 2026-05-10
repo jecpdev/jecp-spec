@@ -1,0 +1,44 @@
+name: Spec quality lint
+
+# v1.1 c2 — wires the locked-design §4 D16=A gate (block PR on errors only).
+# Validates error-catalog headers, conformance YAML structure, and that the
+# README badge stays consistent with the latest semver tag.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'spec/**'
+      - 'conformance/**'
+      - 'schemas/**'
+      - 'README.md'
+      - 'scripts/check-spec-quality.sh'
+      - '.github/workflows/spec-lint.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'spec/**'
+      - 'conformance/**'
+      - 'schemas/**'
+      - 'README.md'
+
+jobs:
+  spec-quality:
+    name: spec-quality (errors block, warnings annotate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tags needed for badge check
+
+      - name: Set up Python (PyYAML for conformance YAML check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Run scripts/check-spec-quality.sh
+        run: bash scripts/check-spec-quality.sh
