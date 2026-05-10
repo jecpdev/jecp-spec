@@ -77,8 +77,8 @@ For any sequence of requests R₁, R₂, ..., Rₙ to a v1.0-conformant Hub wher
 - [02-authentication.md §5.2 — Provenance v2](../spec/02-authentication.md)
 - [02-authentication.md §5.2.2 — Idempotency–Provenance interaction](../spec/02-authentication.md) (cross-reference back to this ADR)
 - [03-errors.md — DUPLICATE_REQUEST, PROVENANCE_MISMATCH](../spec/03-errors.md)
-- Reference Hub source: [`jecp/src/routes/invoke.rs::compute_input_hash`](https://github.com/acromoney888/jobdonebot/blob/main/jecp/src/routes/invoke.rs)
-- Reference Hub source: [`jecp/src/routes/jecp.rs` cache_lookup integration](https://github.com/acromoney888/jobdonebot/blob/main/jecp/src/routes/jecp.rs)
+- Reference Hub source path: `jecp/src/routes/invoke.rs::compute_input_hash` (Hub implementation — open-source release pending)
+- Reference Hub source path: `jecp/src/routes/jecp.rs` cache_lookup integration (Hub implementation — open-source release pending)
 - Stripe Idempotency-Key documentation (anchor for Alternative 1)
 - [RFC 9110 §9.2.2 — Idempotent Methods](https://datatracker.ietf.org/doc/html/rfc9110#section-9.2.2)
 - v1.0.1 errata H2 — this ADR ratifies the patch
