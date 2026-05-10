@@ -1,0 +1,122 @@
+id: JECP-OPS-MUST-BULKHEAD-ISOLATION
+level: MUST
+spec_section: "docs/jecp/phase0-locked-design.md §4 K3 (in-process bulkhead)"
+description: >
+  The Hub MUST partition its DB connections across at least 4 named pools
+  — `invoke`, `read`, `provider`, `background` — with each route bound to
+  exactly one pool per the locked routing table. A surge of slow queries on
+  one pool MUST NOT exhaust connections on another pool. Specifically:
+  saturating the `read` pool with concurrent /v1/capabilities requests MUST
+  NOT delay or fail /v1/invoke requests, which are bound to the `invoke` pool.
+
+  The Hub MUST expose its routing table at `GET /health.pool_assignments`
+  so operators can verify the assignment matches this spec without reading
+  source. Each pool's saturation MUST be observable via the `pools`
+  field on the `/health` response (current size + idle connections).
+
+  `/health` itself MUST remain reachable when ALL workload pools are
+  saturated — its DB probe targets a connectivity-only legacy alias that
+  resolves to the `invoke` pool but does not contend for workload connections.
+
+prerequisites:
+  - description: Hub binary built with `S0` partitioned-pool support enabled.
+  - description: Each pool has a hard floor on `min_connections` so a sudden
+      surge can immediately acquire connections rather than racing pool
+      growth — see `services/database.rs::PartitionedPools::create`.
+
+assertions:
+  - description: GET /health returns `pools` object with 4 named entries
+    request:
+      method: GET
+      path:   /health
+    expected:
+      status: 200
+      body_jsonpath:
+        - { path: "$.pools.invoke",     type: object }
+        - { path: "$.pools.read",       type: object }
+        - { path: "$.pools.provider",   type: object }
+        - { path: "$.pools.background", type: object }
+
+  - description: GET /health.pool_assignments enumerates the routing table
+    request:
+      method: GET
+      path:   /health
+    expected:
+      status: 200
+      body_jsonpath:
+        - { path: "$.pool_assignments['POST /v1/invoke']",          equals: "invoke" }
+        - { path: "$.pool_assignments['POST /v1/jecp']",            equals: "invoke" }
+        - { path: "$.pool_assignments['POST /v1/refunds']",         equals: "invoke" }
+        - { path: "$.pool_assignments['GET  /v1/capabilities']",    equals: "read" }
+        - { path: "$.pool_assignments['POST /v1/manifests']",       equals: "provider" }
+        - { path: "$.pool_assignments['POST /v1/providers/register']", equals: "provider" }
+
+  - description: Surge on read pool does not starve invoke pool
+    note: |
+      Implementations are encouraged to ship an integration test that:
+        1. Holds 100% of the `read` pool's connections (e.g. via
+           `JECP_TEST_MODE=true` + `force_pg_sleep` injector on
+           /v1/capabilities).
+        2. While read is saturated, fires N concurrent /v1/invoke requests.
+        3. Asserts /v1/invoke p99 latency stays within the SLO (≤ 1s)
+           and that no /v1/invoke fails with `DB_UNAVAILABLE`.
+      This MUST be verifiable on the reference Hub at `https://jecp.dev`
+      once its staging Fly app exists; until then the assertion is
+      proven via cargo test `bulkhead_isolation::*` in the Hub repo.
+    expected_behavior: |
+      Saturating any single pool MUST NOT change the failure mode of
+      handlers bound to a different pool.
+
+  - description: /health remains reachable under workload-pool saturation
+    request:
+      method: GET
+      path:   /health
+    note: |
+      Even when invoke/read/provider/background are at capacity, /health
+      MUST return 200 with a finite `checks.response_ms`. The /health DB
+      probe uses a legacy alias that does not compete for workload
+      connections (see L9 in phase0-locked-design.md).
+    expected:
+      status: 200
+      body_jsonpath:
+        - { path: "$.status",      not_equals: "unreachable" }
+        - { path: "$.checks.response_ms", type: number }
+
+negative_cases:
+  - description: Hub MUST NOT route /v1/invoke onto the read pool — that
+      would let catalog-browse traffic block revenue writes.
+    expected_behavior: |
+      Any conformance run that observes `/health.pool_assignments` mapping
+      `POST /v1/invoke` to anything other than `invoke` MUST fail this
+      assertion.
+
+  - description: Hub MUST NOT collapse to a single shared pool.
+    expected_behavior: |
+      All 4 pool entries in `/health.pools` MUST be distinct objects;
+      a single shared pool (e.g. all entries pointing at the same size
+      counter) violates the bulkhead invariant.
+
+reproducer_curl: |
+  # Verify the routing table is published and matches this spec.
+  curl -sS "${TARGET:-https://setsuna-jobdonebot.fly.dev}/health" \
+    | python3 -c "
+  import json, sys
+  d = json.load(sys.stdin)
+  pa = d.get('pool_assignments', {})
+  for k, v in [
+    ('POST /v1/invoke',                'invoke'),
+    ('POST /v1/jecp',                  'invoke'),
+    ('POST /v1/refunds',               'invoke'),
+    ('GET  /v1/capabilities',          'read'),
+    ('POST /v1/manifests',             'provider'),
+    ('POST /v1/providers/register',    'provider'),
+  ]:
+    assert pa.get(k) == v, f'{k} -> {pa.get(k)} (expected {v})'
+  print('OK: pool_assignments matches spec')
+  "
+
+introduced_in: v1.0.2
+references:
+  - https://jecp.dev/spec/v1.0/01-protocol.md
+  - https://martinfowler.com/bliki/CircuitBreaker.html
+  - https://en.wikipedia.org/wiki/Bulkhead_(software)
