@@ -66,9 +66,11 @@ Note: This is a per-call check in v1.0. Cumulative spend tracking is reserved fo
 #### `PROVENANCE_MISMATCH`
 
 - **HTTP**: 403
-- **Cause**: `mandate.provenance_hash` does not match server-computed hash within ±60s window
-- **Retry-safe**: Yes (with fresh mandate)
-- **Recovery**: Recompute provenance_hash with current `total_calls` and timestamp
+- **Cause**: `mandate.provenance_hash` is invalid. Specific sub-causes:
+  - **v2 hash** (`"v2:..."` prefix): wire format malformed, timestamp outside ±300s clock-skew window, nonce reused (replay defense), or HMAC tag mismatch
+  - **v1 hash** (64 hex chars): SHA-256 input does not match server-computed value with the Agent's current `total_calls`
+- **Retry-safe**: Yes (with a freshly-computed v2 hash and a fresh nonce)
+- **Recovery**: Generate a new v2 `provenance_hash` (see 02-authentication.md §5.2) using a fresh nonce and the current unix-seconds timestamp. v1 is deprecated (sunset 2026-08-01) and SHOULD NOT be used for new code; see 02-authentication.md §5.7 for migration timing.
 
 #### `INSUFFICIENT_TRUST`
 

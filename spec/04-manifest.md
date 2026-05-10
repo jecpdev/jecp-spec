@@ -75,8 +75,12 @@ actions:                      # MUST. Non-empty array
     description: <string>     # MUST. <= 300 chars
     streaming: <bool>         # MAY. Default false. If true, Hub serves SSE on /v1/invoke (see 01-protocol.md §4.3)
     pricing:                  # MUST
-      base: <currency string> # e.g., "$0.005" — flat/up-front charge used by Hub for budget pre-flight
-      currency: USD | USDC | both
+      base: <amount string>   # e.g., "$0.005" — flat/up-front charge used by Hub for budget pre-flight
+      currency: <ISO 4217 code> | <crypto code>
+                              # MUST be one of:
+                              #   - ISO 4217 alpha-3: USD, JPY, EUR, GBP, CAD, AUD, CHF, KRW, SGD, HKD, ...
+                              #   - Crypto extension:  USDC, USDT, BTC, ETH, MATIC
+                              #   - Multi-currency literal: "both" (legacy USD+USDC, deprecated 2026-11-01)
       model: flat | per_call | per_token | per_chunk | per_second | tiered
       # Optional unit rates for variable models (Phase B variable pricing engine):
       input_per_token_usdc: <number>   # for model=per_token
@@ -209,7 +213,11 @@ extensions: { ... }           # Vendor-specific
       "required": ["base", "currency", "model"],
       "properties": {
         "base":     { "type": "string", "pattern": "^\\$\\d+(\\.\\d+)?$" },
-        "currency": { "enum": ["USD", "USDC", "both"] },
+        "currency": {
+          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, CAD, AUD, CHF, KRW, SGD, HKD, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). The literal 'both' is retained for backward compatibility with v1.0-draft Providers and means USD+USDC; new Providers SHOULD pick a single concrete currency.",
+          "type": "string",
+          "pattern": "^([A-Z]{3}|both)$"
+        },
         "model":    { "enum": ["flat", "per_call", "per_token", "per_chunk", "per_second", "tiered"] },
         "input_per_token_usdc":  { "type": "number", "minimum": 0 },
         "output_per_token_usdc": { "type": "number", "minimum": 0 },
@@ -252,7 +260,11 @@ extensions: { ... }           # Vendor-specific
     "Billing": {
       "type": "object",
       "properties": {
-        "payout_currency":         { "type": "string" },
+        "payout_currency": {
+          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). MUST be a currency that the Hub's underlying payment processor (e.g., Stripe Connect for fiat, on-chain settlement for crypto) supports for the Provider's registered country.",
+          "type": "string",
+          "pattern": "^[A-Z]{3,5}$"
+        },
         "stripe_connect_required": { "type": "boolean" }
       }
     },
@@ -389,7 +401,7 @@ The Hub MUST validate:
 5. `endpoint` is reachable: the Hub sends a `POST <endpoint>/health` and expects HTTP 200 within 10s.
 6. `endpoint` resolves to a domain the Provider has proven ownership of (DNS TXT verification).
 7. Each Action's `input_schema` and `output_schema` are valid JSON Schema 2020-12.
-8. Each Action's `pricing.base` parses as USD currency.
+8. Each Action's `pricing.base` parses as a currency amount (e.g., `"$0.005"`) and `pricing.currency` is one of: an ISO 4217 alpha-3 fiat code (`USD`, `JPY`, `EUR`, ...), a crypto extension code (`USDC`, `USDT`, `BTC`, `ETH`, `MATIC`), or the literal `both` (deprecated, accepted through 2026-11-01).
 9. Each Action has at least one `examples` entry (RECOMMENDED).
 
 ### 6.2 At Runtime

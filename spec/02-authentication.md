@@ -22,11 +22,32 @@ The Hub MUST require API Key. The Hub MAY require Mandate for specific capabilit
 ### 3.1 Format
 
 ```
-agent_id:  jdb_ag_<24 hex chars>
-api_key:   jdb_ak_<48 hex chars>
+agent_id:  <vendor>_ag_<24+ identifier chars>
+api_key:   <vendor>_ak_<48+ identifier chars>
 ```
 
-The literal prefixes `jdb_ag_` and `jdb_ak_` are the canonical convention of the reference implementation (JobDoneBot Inc.). Independent Hubs MAY use different prefixes (e.g., `acme_ag_`, `acme_ak_`) but MUST document them.
+JECP credentials use a **vendor-prefix-discriminator** convention so multiple Hubs can interoperate without ID collisions. The general pattern is:
+
+```
+{vendor_prefix}_{kind}_{secure_random_identifier}
+   (lowercase    (`ag`,
+   2-8 chars)    `ak`,
+                 `pr`,
+                 `pk`)
+```
+
+Where `vendor_prefix` identifies the issuing Hub (e.g., `jdb` for JobDoneBot, `acme` for an example third-party Hub) and `kind` is one of:
+
+| Kind | Meaning |
+|------|---------|
+| `ag` | Agent ID |
+| `ak` | Agent API key |
+| `pr` | Provider ID |
+| `pk` | Provider API key |
+
+Hubs MUST document their chosen `vendor_prefix` in `/.well-known/agent-guide.json` so consumers can validate IDs without coupling to a specific implementation.
+
+The reference implementation (JobDoneBot Inc., `https://jecp.dev`) uses `jdb_ag_<24 hex chars>` and `jdb_ak_<48 hex chars>`. Examples in this specification use the `jdb_` prefix purely for illustration; conformant Hubs MAY use any prefix that satisfies the regex in Section 4.2.
 
 ### 3.2 Issuance
 
@@ -107,14 +128,18 @@ A Mandate is an authorization object issued by the Agent owner that limits the c
   "type": "object",
   "required": ["agent_id", "api_key"],
   "properties": {
-    "agent_id":         { "type": "string", "pattern": "^jdb_ag_[a-f0-9]+$" },
-    "api_key":          { "type": "string", "pattern": "^jdb_ak_[a-zA-Z0-9]+$" },
+    "agent_id":         { "type": "string", "pattern": "^[a-z]{2,8}_ag_[A-Za-z0-9]{16,}$" },
+    "api_key":          { "type": "string", "pattern": "^[a-z]{2,8}_ak_[A-Za-z0-9]{16,}$" },
     "budget_usdc":      { "type": "number", "minimum": 0, "maximum": 1000 },
     "expires_at":       { "type": "string", "format": "date-time" },
-    "provenance_hash":  { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "provenance_hash":  { "type": "string", "pattern": "^(v2:[0-9]+:[0-9a-fA-F]{16,}:[0-9a-f]{64}|[0-9a-f]{64})$" }
   }
 }
 ```
+
+The `agent_id` and `api_key` regex accept any lowercase 2–8 char vendor prefix (Section 3.1). The `provenance_hash` regex accepts both v1 (legacy 64-hex) and v2 (`v2:<ts>:<nonce>:<hmac>`) wire formats (Section 5).
+
+> **Reference-implementation example values** (informative): the JobDoneBot Hub issues `agent_id` as `jdb_ag_<24 hex>` and `api_key` as `jdb_ak_<48 alphanumeric>`. Other Hubs can use different concrete formats as long as they match the regex above.
 
 ### 4.3 Field Definitions
 
@@ -143,7 +168,9 @@ If absent, the Mandate has no expiration. Hubs MAY enforce a default expiration 
 
 - **Type**: string
 - **Required**: OPTIONAL (RECOMMENDED for autonomous Agents at Trust Tier Silver+)
-- **Format**: 64 lowercase hex chars (SHA-256 output)
+- **Format**: Either of:
+  - **v2 (RECOMMENDED)**: `"v2:<unix_seconds>:<nonce_hex>:<hmac_hex>"` — see Section 5.2
+  - **v1 (legacy, sunset 2026-08-01)**: 64 lowercase hex chars (SHA-256 output) — see Section 5.6
 - **Semantics**: See Section 5.
 
 ### 4.4 Validation Order
@@ -159,40 +186,53 @@ If `budget_usdc` is omitted, the Hub MUST treat it as no upper bound and proceed
 
 ## 5. Provenance Hash
 
+> **Errata 2026-05-10**: Provenance v1 (SHA-256) is deprecated in favor of Provenance v2 (HMAC-SHA256). See Section 5.7 for migration timing. New deployments MUST use v2; v1 verifiers are RETAINED in conformant Hubs until 2026-11-01.
+
 ### 5.1 Purpose
 
-Prevents replay attacks where an attacker captures a Mandate and reuses it. Without Provenance, a stolen Mandate is valid until `expires_at`. With Provenance, the hash binds the Mandate to a specific time window and Agent state.
+Prevents replay attacks where an attacker captures a Mandate and reuses it. Without Provenance, a stolen Mandate is valid until `expires_at`. With Provenance, the hash cryptographically binds the Mandate to a specific time window, a fresh nonce, and possession of the `api_key`.
 
-### 5.2 Computation
+### 5.2 Provenance v2 — HMAC-SHA256 (RECOMMENDED)
+
+#### Wire format
 
 ```
-provenance_hash = SHA256(
-  agent_id || ":" ||
-  total_calls || ":" ||
-  api_key[..8] || ":" ||
-  unix_timestamp_60s_window
+provenance_hash = "v2:" || timestamp || ":" || nonce || ":" || hex(hmac_tag)
+
+hmac_tag = HMAC-SHA256(
+  key  = api_key,
+  msg  = agent_id || ":" || timestamp || ":" || nonce
 )
 ```
 
 Where:
 
-- `||` is byte concatenation
-- `total_calls` is the Agent's lifetime call count (decimal string, no padding)
-- `api_key[..8]` is the first 8 characters of `api_key`
-- `unix_timestamp_60s_window` is `floor(unix_seconds / 60) * 60` (decimal string)
+- `timestamp` is unix seconds (decimal string, no padding).
+- `nonce` is at least 16 hex characters of cryptographically secure random data, generated fresh per call by the Agent.
+- `hex(hmac_tag)` is the lowercase 64-char hex encoding of the 32-byte HMAC-SHA256 output.
+- `||` is byte concatenation.
 
-### 5.3 Verification
+#### Verification
 
-The Hub:
+On receiving a Mandate with a v2 `provenance_hash`, the Hub MUST:
 
-1. Computes the same hash with current values.
-2. Also computes hashes for `±60 seconds` (1 prior, 1 next minute window) to allow clock skew.
-3. If any of the 3 candidates matches, accept.
-4. Otherwise, reject with HTTP 403 `PROVENANCE_MISMATCH`.
+1. Parse the wire format. If it does not match `^v2:[0-9]+:[0-9a-fA-F]{16,}:[0-9a-f]{64}$`, reject with `PROVENANCE_MISMATCH`.
+2. Validate clock skew: `|now - timestamp| <= 300` seconds. Otherwise reject with `PROVENANCE_MISMATCH`.
+3. Look up the canonical plaintext `api_key` for `agent_id` (the Hub already holds this from the Mandate's `api_key` field which has been authenticated against the Hub's stored bcrypt hash).
+4. Recompute `hmac_tag` and constant-time-compare to the received tag. Mismatch → reject with `PROVENANCE_MISMATCH`.
+5. Replay defense: maintain an LRU cache of `(agent_id, nonce)` for at least 600 seconds. If `(agent_id, nonce)` is already in the cache, reject with `PROVENANCE_MISMATCH`. Otherwise insert.
 
-The 60-second window MUST NOT be widened beyond `±60s` to prevent extended replay opportunities.
+The 300-second clock-skew window and 600-second nonce cache window MUST NOT be widened by conformant Hubs without coordinated spec amendment.
 
-### 5.4 When Provenance is Required
+#### Why v2
+
+Compared to v1, Provenance v2 eliminates three weaknesses:
+
+1. **No key prefix leak.** v1 mixes `api_key[..8]` into the hash *input*; the hash output therefore embeds a partial key fingerprint. v2 uses `api_key` only as the HMAC key, so output reveals nothing about the key.
+2. **No collision under key prefix overlap.** Two Agents sharing the first 8 characters of their `api_key` could produce identical v1 hashes for the same `total_calls` and time window. v2 uses HMAC over per-call random nonce → collision probability is `2^-256`.
+3. **Works after key rotation.** Hubs that store `api_key` only as a bcrypt hash (RECOMMENDED — see Section 3.3) cannot compute v1 because it requires the plaintext prefix from a stored value. v2 uses the `api_key` plaintext supplied by the Agent in `mandate.api_key` (authenticated against the bcrypt hash earlier in the same request), so it works even when the stored plaintext column is `NULL`.
+
+### 5.3 When Provenance is Required
 
 The Hub MAY enforce Provenance by capability or trust tier:
 
@@ -202,6 +242,58 @@ The Hub MAY enforce Provenance by capability or trust tier:
 - Trust Tier Platinum: Provenance REQUIRED for `workflow.*` capability
 
 Hubs MUST document their enforcement policy in `/.well-known/agent-guide.json`.
+
+### 5.4 Format Discrimination
+
+Hubs MUST dispatch verification based on the `"v2:"` prefix of the wire string:
+
+```
+if claimed.startsWith("v2:"):
+    verify_v2(claimed)
+else:
+    verify_v1(claimed)
+```
+
+This allows v1 and v2 hashes to coexist during the migration window without breaking changes to the `mandate.provenance_hash` field type.
+
+### 5.5 Reference Implementation Note
+
+The `JECP-TECHNICAL-DESIGN.md` document published by the reference implementation (JobDoneBot Inc.) initially specified v1 with a 4-part input that includes `unix_timestamp_60s_window`. The actual Rust reference implementation has always used the 3-part input documented in Section 5.6 (without the timestamp window). This errata fixes the discrepancy by canonicalizing the 3-part form as v1, deprecating it, and introducing v2 (Section 5.2) as the path forward. Conformant Hubs MUST implement v2 verification. v1 verification is OPTIONAL for new Hubs and RETAINED for backward compatibility through 2026-11-01.
+
+### 5.6 Provenance v1 — SHA-256 (DEPRECATED, sunset 2026-08-01)
+
+> **Status**: Deprecated as of 2026-05-10. New Agents and new Hub deployments MUST use v2 (Section 5.2). v1 is documented here only for verifying hashes generated by Agents that have not yet upgraded.
+
+#### Wire format
+
+```
+provenance_hash = lowercase_hex( SHA256(
+  agent_id || ":" || total_calls || ":" || api_key[..8]
+))
+```
+
+Where:
+
+- `total_calls` is the Agent's lifetime call count (decimal string, no padding).
+- `api_key[..8]` is the first 8 characters of `api_key`.
+
+#### Verification
+
+The Hub:
+
+1. Computes the same hash with the Agent's current `total_calls` and `api_key`.
+2. Constant-time compares to the received hash.
+3. On mismatch, returns HTTP 403 `PROVENANCE_MISMATCH`.
+
+v1 has no timestamp or nonce binding, so it provides no replay defense beyond `mandate.expires_at`. Hubs that accept v1 SHOULD enforce a short `expires_at` window (≤ 5 minutes) at the application layer.
+
+### 5.7 Sunset Schedule for v1
+
+| Date | Conformance Requirement |
+|------|------------------------|
+| 2026-05-10 | v2 specification published. Hubs MUST implement v2 verification within 30 days of issuing this errata. SDKs SHOULD ship `computeProvenanceV2` helpers. |
+| 2026-08-01 | Hubs MUST attach `Deprecation: true` and `Sunset: Sat, 01 Nov 2026 00:00:00 GMT` response headers when an invocation succeeds with a v1 hash, so Agents are notified to upgrade. |
+| 2026-11-01 | Hubs MUST reject v1 wire format with `PROVENANCE_MISMATCH`. v1 verifiers MAY be removed from implementations. |
 
 ## 6. Trust Gate
 
@@ -325,9 +417,10 @@ If an `api_key` is exposed:
 If a Mandate is captured in transit (mitigated by HTTPS), the attacker has limited time:
 
 - Without Provenance: until `expires_at`.
-- With Provenance: at most 120 seconds (the ±60s window).
+- With Provenance v1 (legacy): no nonce binding, so an attacker can replay the captured Mandate freely until `expires_at`. v1 alone does not defend against replay.
+- With Provenance v2: at most 600 seconds (the nonce-cache window) AND the attacker still cannot replay the same Mandate twice because the second replay collides with the cached `(agent_id, nonce)` pair. After 600 seconds the cache may evict the nonce, but the timestamp will be outside the ±300s clock-skew window, so the Mandate fails validation regardless.
 
-Therefore, Provenance is RECOMMENDED for any Agent that issues Mandates over networks the Agent owner does not fully control.
+Therefore, Provenance v2 is RECOMMENDED for any Agent that issues Mandates over networks the Agent owner does not fully control. Provenance v1 alone is INSUFFICIENT for replay defense and is being sunset (Section 5.7).
 
 ### 9.3 TLS Requirements
 
@@ -351,6 +444,34 @@ API key validation: the Hub MUST use constant-time comparison to prevent timing 
 ### 9.6 Privilege Escalation
 
 The Trust Gate MUST be enforced server-side. Clients MUST NOT be trusted to declare their own tier.
+
+### 9.7 Server-Side Request Forgery (SSRF) on Agent-Controlled URLs
+
+Multiple JECP fields accept URLs that the Hub may dereference at request time (`callback_url` for async invocations, Provider `endpoint_url` during routing — see 04-manifest.md, webhook destinations — see 01-protocol.md §5). If the Hub fetches these URLs without restriction, an attacker can use the Hub as a proxy into the Hub's internal network.
+
+Conformant Hubs MUST validate every Agent-controlled URL before issuing the outbound request. Validation MUST reject all of the following:
+
+| Class | Example | Rationale |
+|-------|---------|-----------|
+| Loopback addresses | `http://127.0.0.1`, `http://[::1]`, `http://localhost` | Reach internal services on the Hub host |
+| Link-local addresses | `http://169.254.169.254`, `http://[fe80::]` | EC2 / GCP / Azure instance metadata endpoints leak IAM credentials |
+| Private IPv4 ranges | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` | Reach internal services on the Hub VPC |
+| Private IPv6 ranges | `fc00::/7` (ULA) | IPv6 equivalent of private IPv4 |
+| Non-HTTPS schemes | `gopher://`, `file://`, `ftp://`, `dict://` | Bypass HTTP semantics; some can read local files |
+| Hostnames that resolve to any of the above | DNS rebinding using a TTL-1 record | Bypasses single-resolution-time checks |
+
+Hubs MUST resolve hostnames at request time and MUST re-check the resolved IP against the deny list immediately before connecting. Hubs SHOULD pin the resolved IP for the duration of the request to prevent DNS-rebinding (the IP used for the `connect()` call MUST equal the IP that passed the deny-list check).
+
+Hubs MUST enforce these rules on every URL field, including but not limited to:
+
+- `mandate.callback_url` (when used)
+- `provider.endpoint_url` (in Provider manifests — see 04-manifest.md)
+- `webhook.destination_url` (when registered — see 01-protocol.md §5)
+- `referred_by` if it ever takes a URL form (currently scalar Agent ID)
+
+Hubs MAY maintain an additional explicit allowlist of public Provider domains for `provider.endpoint_url`, but the deny list above is the minimum baseline.
+
+Conformant Hubs SHOULD log SSRF attempts (URLs that hit the deny list) with sufficient detail to detect coordinated probing.
 
 ## 10. References
 
