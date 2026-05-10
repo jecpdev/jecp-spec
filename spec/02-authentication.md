@@ -220,9 +220,27 @@ On receiving a Mandate with a v2 `provenance_hash`, the Hub MUST:
 2. Validate clock skew: `|now - timestamp| <= 300` seconds. Otherwise reject with `PROVENANCE_MISMATCH`.
 3. Look up the canonical plaintext `api_key` for `agent_id` (the Hub already holds this from the Mandate's `api_key` field which has been authenticated against the Hub's stored bcrypt hash).
 4. Recompute `hmac_tag` and constant-time-compare to the received tag. Mismatch → reject with `PROVENANCE_MISMATCH`.
-5. Replay defense: Hubs SHOULD maintain an LRU cache of `(agent_id, nonce)` for at least 600 seconds. If `(agent_id, nonce)` is already in the cache, reject with `PROVENANCE_MISMATCH`. Otherwise insert. (Promotion to MUST is targeted for v1.1 once cluster-wide cache semantics are specified — see §5.9.)
+5. Replay defense: Hubs SHOULD maintain an LRU cache of `(agent_id, nonce)` for at least 600 seconds. If `(agent_id, nonce)` is already in the cache, reject with `PROVENANCE_MISMATCH` and `details.subcause = nonce_replay`. Otherwise insert. (Promotion to MUST is targeted for v1.1 once cluster-wide cache semantics are specified — see §5.9.)
 
 The 300-second clock-skew window MUST NOT be widened by conformant Hubs without coordinated spec amendment. The 600-second nonce cache window applies when the Hub implements the cache; widening past 600s is permitted as a Hub configuration choice (longer windows strengthen the defense at the cost of memory).
+
+#### 5.2.1 Cache implementation requirements (informative)
+
+When a Hub implements the §5.2 step 5 cache, the following requirements apply:
+
+- **Lookup case**: nonce comparison is case-insensitive. Hubs MUST store and compare nonces in lowercase to ensure that `"AbCd"` and `"abcd"` are treated as the same nonce. SDKs SHOULD emit lowercase hex (the reference SDK does), but Hubs MUST tolerate uppercase input.
+- **Atomic check-and-insert**: The lookup and insertion MUST be a single atomic operation. A naive `if !contains(k) { insert(k) }` opens a TOCTOU race window in which two concurrent invocations with the same nonce both observe an empty cache and both succeed.
+- **Per-agent flood defense**: Hubs SHOULD enforce a per-agent rate limit (the reference Hub uses 60 RPM by default). At 60 RPM × 600s TTL, a single agent cannot occupy more than ~600 cache entries — well below typical global caps and unable to evict other agents' state. The rate limit, not a per-agent cache quota, is the recommended mitigation against single-agent flood attacks.
+- **Single-instance vs cluster**: A single-instance, in-memory cache is sufficient for Hubs running on a single primary node. Multi-region or load-balanced Hubs MUST share the cache (e.g. via Redis) or the replay defense is bypassed by routing the replay to a different region. The reference Hub at `setsuna-jobdonebot.fly.dev` is currently single-region (Tokyo) and uses an in-memory cache; v1.1 will specify the shared-cache protocol (see §5.9).
+- **Restart**: Cache contents are not durable. After a Hub restart, the cache is empty and the first 300 seconds following restart re-open the replay window. This is acceptable because a) restarts are rare, b) the timestamp window remains enforced, and c) the bcrypt-verified `api_key` is still required.
+
+#### 5.2.2 Idempotency vs Provenance interaction (informative)
+
+Hubs implement two distinct but related caches: idempotency (§9.4) and Provenance replay defense (§5.2 step 5). Their interaction is non-obvious and easy to get wrong; conformant Hubs MUST follow this ordering:
+
+1. **Idempotency check fires first.** A request whose `id` is already in the idempotency cache returns the cached response without re-executing the handler. The cached response is returned regardless of whether the new request's `provenance_hash` matches the cached request's.
+2. **Therefore, idempotency cache keys MUST include `mandate.provenance_hash`** in their canonical input hash. Without this, two requests with the same `id` and same `input` but different `provenance_hash` collide on the idempotency cache, returning a cached success response and bypassing Provenance verification on the second call. The reference Hub computes the idempotency key as `SHA256(capability || "|" || action || "|" || input || "|" || mandate.provenance_hash)`.
+3. **Replay cache only sees first-time requests.** Because step 1 short-circuits idempotent retries, the replay cache observes a given `(agent_id, nonce)` exactly once even if the agent issues the same request multiple times (the legitimate retry pattern). This means the replay cache TTL (600s) does NOT need to extend to the idempotency window (24h).
 
 #### Why v2
 
