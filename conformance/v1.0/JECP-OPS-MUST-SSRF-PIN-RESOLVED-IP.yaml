@@ -1,0 +1,60 @@
+id: JECP-OPS-MUST-SSRF-PIN-RESOLVED-IP
+level: MUST
+spec_section: "02-authentication §9.7.1.1 step 6 (connect-time pin)"
+description: >
+  The Hub MUST `connect()` to the SAME address it validated. Specifically,
+  a hostname whose resolver returns a public IP at validation time and a
+  private IP on a second resolution MUST result in connection to the
+  pinned (validated) address — NOT the second resolution. This closes the
+  DNS-rebinding bypass class where attackers use TTL=1 records to swap
+  addresses between check and connect.
+
+  External validation of this assertion requires either (a) a controllable
+  DNS server with TTL toggle, or (b) a unit-test resolver injection
+  (preferred for CI). The reference Hub implements (b) via Rust's
+  `dns::Resolve` trait in `jecp/src/protocol/url_guard.rs` tests.
+
+  This assertion is informational at the wire-format level: there is no
+  way to externally observe IP pinning by ONLY watching JECP responses.
+  Hubs prove conformance by:
+
+  1. Showing this YAML in their conformance suite output.
+  2. Linking to a unit test (e.g.,
+     `jecp/src/protocol/url_guard.rs::tests::dns_rebind_pinned`) that
+     injects a 2-call resolver returning different IPs and asserts the
+     `reqwest::Client` connects to the pinned address.
+  3. Optionally: a controllable TTL=1 fixture under `*.jecp.dev`.
+
+  Currently RED against v1.0.2 (no `url_guard` module exists). v1.1.0 c6
+  ships the module + 20 unit tests; one of them is the rebinding test
+  this assertion ratifies.
+
+# This YAML is intentionally documentation-only — no top-level `request:`
+# block. The harness emits DELEGATE so the YAML still appears in reports.
+# Hubs satisfy this assertion by passing the named unit test below.
+
+reference_unit_tests:
+  - language: rust
+    file:     jecp/src/protocol/url_guard.rs
+    function: tests::dns_rebind_returns_pinned_address
+    asserts: |
+      Given a custom dns::Resolve that returns 1.1.1.1 on the first call
+      and 127.0.0.1 on the second, a `reqwest::Client` built via
+      `url_guard::guarded_client(pinned_addr=1.1.1.1)` MUST connect to
+      1.1.1.1 (the pinned addr), NOT 127.0.0.1 (the second resolution).
+
+  - language: rust
+    file:     jecp/src/protocol/url_guard.rs
+    function: tests::redirect_disabled
+    asserts: |
+      `url_guard::guarded_client` MUST set `redirect(Policy::none())`
+      so a 302 → private IP cannot bypass validation.
+
+reproducer_test_command: |
+  cd jecp && cargo test --package jecp protocol::url_guard::tests::dns_rebind
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.0/02-authentication.md#971-composite-enforcement-v102-errata-normative
+  - https://jecp.dev/spec/v1.0/adr/0002-ssrf-defense-architecture.md
+  - https://en.wikipedia.org/wiki/DNS_rebinding

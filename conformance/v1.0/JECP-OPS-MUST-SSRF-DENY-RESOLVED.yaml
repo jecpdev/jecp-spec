@@ -1,0 +1,92 @@
+id: JECP-OPS-MUST-SSRF-DENY-RESOLVED
+level: MUST
+spec_section: "02-authentication §9.7.1.1 (DNS resolve + deny-list step 4)"
+description: >
+  When an Agent-controlled URL's hostname (not an IP literal) resolves to
+  any address in the deny CIDRs from §9.7.1.2, the Hub MUST reject the
+  URL at validation time with HTTP 422 + URL_BLOCKED_SSRF +
+  `error.details.reason = "resolved_to_deny_cidr"`.
+
+  This assertion requires controllable DNS fixtures: hostnames whose
+  A/AAAA records resolve into deny ranges. The reference Hub uses the
+  fixtures published at:
+
+    ssrf-loopback.jecp.dev   A 127.0.0.1
+    ssrf-metadata.jecp.dev   A 169.254.169.254
+    ssrf-rfc1918.jecp.dev    A 10.0.0.1
+    ssrf-public.jecp.dev     A 1.1.1.1   (positive control — MUST NOT be rejected)
+
+  Hubs implementing this assertion against their own infrastructure MAY
+  substitute equivalent fixtures and MUST document them.
+
+  Currently RED against v1.0.2; v1.1.0 c8 turns GREEN.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-ssrf-res-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: subscribe a webhook with destination resolving to 127.0.0.1
+  method: POST
+  path:   /v1/subscriptions
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    {
+      "name":            "conformance-ssrf-res-${TS}",
+      "destination_url": "https://ssrf-loopback.jecp.dev/webhook",
+      "event_types":     ["invoke.completed"]
+    }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.jecp",                            equals: "1.0" }
+    - { path: "$.error.code",                      equals: "URL_BLOCKED_SSRF" }
+    - { path: "$.error.details.reason",            equals: "resolved_to_deny_cidr" }
+    - { path: "$.error.details.documentation_url", contains: "/errors/url_blocked_ssrf" }
+
+negative_cases:
+  - description: ssrf-public.jecp.dev (resolves to 1.1.1.1) MUST NOT be rejected
+    note: |
+      Positive control. If the Hub rejects this domain, the deny list is
+      misconfigured and is suppressing legitimate Provider URLs.
+    expected_behavior: |
+      Subscription accepts (200) — the URL is structurally valid, scheme
+      is https, host resolves to a public IP outside any deny CIDR.
+
+  - description: deref-time validation MUST also fire (DNS rebinding defense)
+    note: |
+      A Provider whose endpoint_url's A record at register time pointed at
+      a public IP, then later flipped to 127.0.0.1, MUST not be successfully
+      forwarded to. This is enforced by `JECP-OPS-MUST-SSRF-PIN-RESOLVED-IP`.
+    expected_behavior: |
+      Outbound forward returns 502 (or marks webhook outbox abandoned)
+      with reason='connect_pin_violation' or 'resolved_to_deny_cidr'.
+
+reproducer_curl: |
+  TS=$(date +%s)
+  REG=$(curl -sS -X POST https://jecp.dev/api/agents/register \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"conformance-ssrf-res-$TS\",\"agent_type\":\"conformance\"}")
+  AID=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_id"])')
+  KEY=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+  curl -sS -w "\nHTTP=%{http_code}\n" -X POST https://setsuna-jobdonebot.fly.dev/v1/subscriptions \
+    -H "Content-Type: application/json" \
+    -H "X-Agent-ID: $AID" -H "X-API-Key: $KEY" \
+    -d "{\"name\":\"conformance-ssrf-res-$TS\",\"destination_url\":\"https://ssrf-loopback.jecp.dev/webhook\",\"event_types\":[\"invoke.completed\"]}"
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.0/02-authentication.md#971-composite-enforcement-v102-errata-normative
+  - https://jecp.dev/errors/url_blocked_ssrf

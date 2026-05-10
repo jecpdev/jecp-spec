@@ -1,0 +1,82 @@
+id: JECP-OPS-MUST-SSRF-DENY-IP-LITERAL
+level: MUST
+spec_section: "02-authentication §9.7 + §9.7.1.2"
+description: >
+  POST /v1/subscriptions or POST /v1/providers/register with an
+  `endpoint_url` host that is an IP literal in any of the deny CIDRs
+  (loopback, link-local, RFC 1918, RFC 4193, IPv4-mapped IPv6,
+  `0.0.0.0/8`) MUST be rejected with HTTP 422 + JECP envelope error.code
+  = "URL_BLOCKED_SSRF". `error.details.reason` MUST be
+  `resolved_to_deny_cidr` or `host_syntax`.
+
+  This assertion is currently RED against v1.0.2 — turning it GREEN is
+  the v1.1.0 c8 deliverable. The protocol/url_guard.rs implementation
+  in JobDoneBot c6+c7 closes the gap.
+
+setup:
+  - description: register a fresh agent (used as subscription owner)
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-ssrf-ip-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: try to subscribe a webhook with destination_url=loopback IP literal
+  method: POST
+  path:   /v1/subscriptions
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    {
+      "name":            "conformance-ssrf-ip-${TS}",
+      "destination_url": "https://127.0.0.1/webhook",
+      "event_types":     ["invoke.completed"]
+    }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.jecp",                            equals: "1.0" }
+    - { path: "$.status",                          equals: "failed" }
+    - { path: "$.error.code",                      equals: "URL_BLOCKED_SSRF" }
+    - { path: "$.error.details.reason",            type:   string }
+    - { path: "$.error.details.documentation_url", contains: "/errors/url_blocked_ssrf" }
+
+negative_cases:
+  - description: 169.254.169.254 (AWS metadata) MUST also be rejected
+    note:        "Reference Hub adds this address explicitly to the deny list."
+    expected_behavior: |
+      Same 422 + URL_BLOCKED_SSRF; reason='resolved_to_deny_cidr'.
+  - description: ::ffff:127.0.0.1 (IPv4-mapped IPv6) MUST be rejected
+    note:        "Common bypass; requires deny-list entry ::ffff:0.0.0.0/96."
+    expected_behavior: |
+      Same 422 + URL_BLOCKED_SSRF; reason='resolved_to_deny_cidr'.
+  - description: percent-encoded loopback (https://%31%32%37.0.0.1/) MUST be rejected
+    note:        "Host MUST be normalized before deny-list comparison (§9.7.1.1 step 3)."
+    expected_behavior: |
+      Same 422 + URL_BLOCKED_SSRF; reason='host_syntax' or 'resolved_to_deny_cidr'.
+
+reproducer_curl: |
+  TS=$(date +%s)
+  REG=$(curl -sS -X POST https://jecp.dev/api/agents/register \
+        -H "Content-Type: application/json" \
+        -d "{\"name\":\"conformance-ssrf-ip-$TS\",\"agent_type\":\"conformance\"}")
+  AID=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agent_id"])')
+  KEY=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["api_key"])')
+  curl -sS -w "\nHTTP=%{http_code}\n" -X POST https://setsuna-jobdonebot.fly.dev/v1/subscriptions \
+    -H "Content-Type: application/json" \
+    -H "X-Agent-ID: $AID" -H "X-API-Key: $KEY" \
+    -d "{\"name\":\"conformance-ssrf-ip-$TS\",\"destination_url\":\"https://127.0.0.1/webhook\",\"event_types\":[\"invoke.completed\"]}"
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.0/02-authentication.md#971-composite-enforcement-v102-errata-normative
+  - https://jecp.dev/errors/url_blocked_ssrf
+  - https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
