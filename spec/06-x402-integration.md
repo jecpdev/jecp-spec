@@ -350,10 +350,13 @@ v1.1.0 conformant Hubs configured to support x402 MUST:
 
 1. Pin the facilitator URL at boot via operator-controlled environment variable (e.g., `JECP_X402_FACILITATOR_URL`). The URL MUST NOT be agent-controllable.
 2. Pass the facilitator URL through the composite SSRF defense (ADR-0002 / 02-authentication.md §9.7.1) at boot. If the URL fails the pipeline (resolves to a deny CIDR, scheme ≠ `https`, etc.) the Hub MUST refuse to start.
-3. Pin the facilitator's TLS certificate by SPKI SHA-256 (e.g., `JECP_X402_FACILITATOR_CERT_PIN`). Mismatch at TLS handshake = abort + alert + emit HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "cert_pin_mismatch"`.
-4. Pin the facilitator's Ed25519 response signing public key (e.g., `JECP_X402_FACILITATOR_PUBKEY`). Verify the signature on every `/verify` and `/settle` response body before trusting any field. Mismatch = HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "signature_pin_mismatch"`.
+3. Pin the facilitator's Ed25519 response signing public key (e.g., `JECP_X402_FACILITATOR_PUBKEY`). Verify the signature on every `/verify` and `/settle` response body before trusting any field. Mismatch = HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "signature_pin_mismatch"`.
 
-Multi-facilitator quorum (Panel 2's preferred model) is **deferred to v1.2** per ADR-0003. v1.1.0's three independent defenses (cert pin + signature verify + reconciler — see §6.3) are the locked baseline.
+v1.1.0 conformant Hubs SHOULD:
+
+4. Pin the facilitator's TLS certificate by SPKI SHA-256 (e.g., `JECP_X402_FACILITATOR_CERT_PIN`). Mismatch at TLS handshake = abort + alert + emit HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "cert_pin_mismatch"`. See ADR-0005 for the rationale on downgrading this from MUST to SHOULD in v1.1.0; full enforcement targets v1.1.1 via a `rustls` custom `ServerCertVerifier`.
+
+Multi-facilitator quorum (Panel 2's preferred model) is **deferred to v1.2** per ADR-0003. v1.1.0's locked baseline is signature verify + reconciler + SSRF guard (see §6.3); cert pin lands in v1.1.1 per ADR-0005.
 
 ### 6.2 Reconciler
 

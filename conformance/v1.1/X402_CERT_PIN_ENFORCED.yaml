@@ -1,8 +1,10 @@
 id: X402_CERT_PIN_ENFORCED
-level: MUST
+level: SHOULD
+v110_status: deferred
+v110_errata: "ADR-0005 — cert pin downgraded to SHOULD in v1.1.0. Full enforcement targets v1.1.1 with rustls custom ServerCertVerifier."
 spec_section: "06-x402-integration §6.1; 03-errors §3.8 (X402_FACILITATOR_UNREACHABLE subcause cert_pin_mismatch)"
 threat_id: "Panel 2 §2.2 TM-S2 (spoofed/MITM facilitator)"
-severity: critical
+severity: high
 target: hub
 description: >
   The Hub MUST pin the facilitator's TLS certificate by SPKI SHA-256
