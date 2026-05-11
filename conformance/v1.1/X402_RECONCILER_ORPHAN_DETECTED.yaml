@@ -1,0 +1,66 @@
+id: X402_RECONCILER_ORPHAN_DETECTED
+level: MUST
+spec_section: "06-x402-integration §6.2 (Reconciler orphan state)"
+threat_id: "Panel 2 §3.4 TM-ST2 (settlement orphan)"
+severity: high
+target: hub
+description: >
+  The reconciler MUST mark a `facilitator_attested` settlement as
+  `orphaned` if the corresponding on-chain receipt cannot be found
+  within 10 minutes of the facilitator attestation. This catches
+  facilitators that report success for transactions that never make it
+  on-chain (e.g., stuck in mempool, dropped, replaced).
+
+  This assertion uses an RPC stub configured to return "not found" for
+  the recorded tx_hash for the duration of the 10-minute orphan window.
+  The reconciler MUST flip the settlement to `orphaned` and emit an
+  operator alert.
+
+setup:
+  - description: register + invoke; facilitator attests but RPC will return not found
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-orphan-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "orphan" } }
+    expected:
+      status: 200
+    extract:
+      tx_hash: "$.billing.x402.settlement_tx"
+
+  - description: configure RPC stub to return null receipt for this tx_hash indefinitely
+    note: harness control plane → /admin/base-rpc-stub/return-null $tx_hash
+
+  - description: simulated time advance — fast-forward 10 minutes via test helper
+    note: |
+      Conformance runners with a real Hub MUST honor the 10-min real
+      timer (slow path); test mode exposes a /admin/clock-advance helper.
+
+request:
+  description: re-fetch the settlement; expect status = orphaned
+  method: GET
+  path:   /v1/payments/${tx_hash}
+  headers:
+    X-Agent-ID: "${agent_id}"
+    X-API-Key:  "${api_key}"
+
+expected:
+  status: 200
+  body_jsonpath:
+    - { path: "$.status", equals: "orphaned" }
+
+postconditions:
+  - x402_settlements row has status = "orphaned"
+  - Hub audit_log records the orphan detection (operator alert fires)
+  - any Provider payout queued against this settlement is held until manual review
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#62-reconciler

@@ -1,0 +1,51 @@
+{
+  "name": "x402-error-not-accepted",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture for HTTP 422 X402_NOT_ACCEPTED with subcause=capability_wallet_only (the agent presented X-Payment against a capability that only accepts the Stripe wallet path).",
+
+  "scenario": "agent submits X-Payment to a capability whose manifest declares payment_methods: [\"stripe\"] (or omits the field, defaulting to [\"stripe\"])",
+
+  "request": {
+    "method": "POST",
+    "path": "/v1/invoke",
+    "headers": {
+      "X-Agent-ID": "jdb_ag_x402test_notaccepted_001",
+      "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+      "X-Payment":  "<base64 encoded valid x402 envelope>"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_notaccepted_001",
+      "capability": "content-factory",
+      "action": "summarize",
+      "input": { "text": "Lorem ipsum dolor sit amet.", "max_length": 20 }
+    }
+  },
+
+  "facilitator_calls": [],
+
+  "expected_response": {
+    "status": 422,
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_notaccepted_001",
+      "status": "failed",
+      "error": {
+        "code": "X402_NOT_ACCEPTED",
+        "message": "Capability content-factory/summarize does not accept x402 payments. Drop X-Payment and use the wallet path.",
+        "details": {
+          "accepted": ["stripe"],
+          "received": "x402",
+          "subcause": "capability_wallet_only",
+          "documentation_url": "https://jecp.dev/errors/x402_not_accepted"
+        }
+      }
+    }
+  },
+
+  "postconditions": [
+    "facilitator was NOT called (validation fires before any facilitator round-trip)",
+    "x402_settlements has NO row",
+    "the agent's signed authorization is NOT consumed (no nonce burn at the JECP layer; the signature itself remains replay-able on a different x402-accepting capability if the agent chooses)"
+  ]
+}

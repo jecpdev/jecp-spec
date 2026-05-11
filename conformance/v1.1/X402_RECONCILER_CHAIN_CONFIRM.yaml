@@ -1,0 +1,68 @@
+id: X402_RECONCILER_CHAIN_CONFIRM
+level: MUST
+spec_section: "06-x402-integration §6.2 (Reconciler)"
+threat_id: "Panel 2 §3.4 TM-ST1 (settlement timing)"
+severity: high
+target: hub
+description: >
+  The Hub MUST run a background reconciler that, every ≤60 seconds,
+  verifies all `facilitator_attested` settlements against the on-chain
+  receipt via Base RPC. A successfully-attested settlement whose
+  on-chain receipt confirms (status = success, value/recipient match)
+  MUST transition to status = "chain_confirmed" within one tick.
+
+  This assertion verifies the state transition on a settlement that has
+  already landed on-chain (Base Sepolia in test mode, mocked RPC in
+  unit-test mode).
+
+setup:
+  - description: register a fresh agent and submit a successful x402 invoke
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-reconcile-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "reconcile-confirm" } }
+    expected:
+      status: 200
+    extract:
+      tx_hash: "$.billing.x402.settlement_tx"
+
+  - description: verify settlement starts in `facilitator_attested` state
+    request:
+      method: GET
+      path:   /v1/payments/${tx_hash}
+      headers:
+        X-Agent-ID: "${agent_id}"
+        X-API-Key:  "${api_key}"
+    expected:
+      body_jsonpath:
+        - { path: "$.status", equals: "facilitator_attested" }
+
+  - description: wait for one reconciler tick (60s default)
+    note: harness sleep 65s
+
+request:
+  description: re-fetch the settlement; expect chain_confirmed
+  method: GET
+  path:   /v1/payments/${tx_hash}
+  headers:
+    X-Agent-ID: "${agent_id}"
+    X-API-Key:  "${api_key}"
+
+expected:
+  status: 200
+  body_jsonpath:
+    - { path: "$.status",                equals: "chain_confirmed" }
+    - { path: "$.chain_confirmed_at",    matches: "^\\d{4}-\\d{2}-\\d{2}T" }
+    - { path: "$.tx_hash",               equals: "${tx_hash}" }
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#62-reconciler

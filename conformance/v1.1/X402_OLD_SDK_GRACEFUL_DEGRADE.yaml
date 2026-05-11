@@ -1,0 +1,59 @@
+id: X402_OLD_SDK_GRACEFUL_DEGRADE
+level: MUST
+spec_section: "06-x402-integration §9.1; 01-protocol §3.3.1"
+threat_id: "n/a (backward compat invariant)"
+severity: high
+target: hub
+description: >
+  An old-SDK-shaped request (no X-Payment header, no awareness of the
+  payment sibling field) against a capability that declares
+  payment_methods: ["stripe", "x402"] MUST continue to use the wallet
+  path. Specifically: if wallet has balance, the call succeeds (200);
+  if wallet is insufficient, the Hub returns 402 PAYMENT_REQUIRED with
+  next_action.type = "topup" present (legible to old SDKs) AND a sibling
+  payment field (silently ignored by old SDKs). Old SDK MUST NOT see
+  any X402_* error code on this path.
+
+setup:
+  - description: register a fresh agent (zero balance to force 402)
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-oldsdk-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke an x402-accepting capability WITHOUT X-Payment, expect wallet-path 402
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-oldsdk-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "old-sdk" } }
+
+expected:
+  status: 402
+  body_jsonpath:
+    - { path: "$.error.code",                  equals: "PAYMENT_REQUIRED" }
+    - { path: "$.next_action.type",            equals: "topup" }
+    - { path: "$.payment.x402Version",         equals: 1 }
+    - { path: "$.payment.accepts[0].scheme",   equals: "stripe-wallet" }
+    - { path: "$.payment.accepts[1].scheme",   equals: "exact" }
+
+postconditions:
+  - response error.code is the v1.0 PAYMENT_REQUIRED, NOT a new X402_* variant
+  - facilitator stub recorded ZERO calls (no X-Payment was presented)
+  - x402_settlements has NO new row
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#9-backward-compatibility
+  - https://jecp.dev/spec/v1.1/01-protocol.md#331-the-payment-sibling-field-on-402-responses-v110

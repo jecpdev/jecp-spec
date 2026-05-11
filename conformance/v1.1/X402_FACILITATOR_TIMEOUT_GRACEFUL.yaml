@@ -1,0 +1,66 @@
+id: X402_FACILITATOR_TIMEOUT_GRACEFUL
+level: MUST
+spec_section: "06-x402-integration §4.4; 03-errors §3.8 (X402_SETTLEMENT_TIMEOUT)"
+threat_id: "Panel 2 §2.2 TM-D1 (facilitator unavailability cascade)"
+severity: high
+target: hub
+description: >
+  When the facilitator does not respond within the configured timeout
+  (5s default), the Hub MUST return HTTP 504 X402_SETTLEMENT_TIMEOUT
+  with details.subcause = "facilitator_slow", a Retry-After header in
+  [1, 600], and a next_action that points the agent at the wallet
+  fallback path. The Hub MUST NOT cascade the failure to the wallet
+  path: a separate request without X-Payment MUST succeed normally.
+
+  This assertion uses a facilitator stub configured to delay every
+  response by 8 seconds (longer than the Hub's 5s timeout).
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-timeout-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: configure facilitator stub to delay all responses by 8000ms
+    note: harness control plane → /admin/x402-stub/inject-delay 8000
+
+request:
+  description: invoke with X-Payment, expect 504 X402_SETTLEMENT_TIMEOUT
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-timeout-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "timeout-test" } }
+
+expected:
+  status: 504
+  headers:
+    Retry-After:
+      present: true
+      format:  integer-seconds
+      range:   [1, 600]
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_SETTLEMENT_TIMEOUT" }
+    - { path: "$.error.details.subcause", equals: "facilitator_slow" }
+    - { path: "$.next_action.type",       in: ["topup", "x402_settle"] }
+
+postconditions:
+  - x402_settlements has NO row for this request_id (the Hub aborted before /settle could attest)
+  - separate concurrent wallet-path request to /v1/invoke succeeds (bulkhead isolation)
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#44-failure-handling
+  - https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3

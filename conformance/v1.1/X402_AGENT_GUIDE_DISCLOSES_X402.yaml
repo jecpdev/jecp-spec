@@ -1,0 +1,59 @@
+id: X402_AGENT_GUIDE_DISCLOSES_X402
+level: MUST
+spec_section: "05-discovery §4.4.1; 06-x402-integration §7.3"
+threat_id: "n/a (discoverability invariant)"
+severity: medium
+target: hub
+description: >
+  When the Hub configures x402 (i.e., the facilitator URL, Splitter
+  address, and Ed25519 pubkey are set AND any capability declares
+  payment_methods containing "x402"), the
+  /.well-known/agent-guide.json document MUST include
+  payment_methods_supported containing "x402" AND a top-level x402
+  block with facilitator_url, supported_networks, supported_assets,
+  splitter_contract, split_ratio, x402_version, and spec_url.
+
+  Hubs that have NOT configured x402 (or have engaged the kill switch
+  globally) MUST NOT advertise x402 in agent-guide.json. The kill
+  switch interaction is asymmetric: temporary kill switch (operator
+  recovery) MAY keep x402 in agent-guide; permanent disable MUST
+  remove it within 24h.
+
+setup:
+  - description: ensure Hub has at least one x402-accepting capability published
+    note: harness pre-condition assumes jecp-test/x402-echo is published
+
+request:
+  description: GET /.well-known/agent-guide.json
+  method: GET
+  path:   /.well-known/agent-guide.json
+
+expected:
+  status: 200
+  headers:
+    Content-Type:
+      contains: "application/json"
+  body_jsonpath:
+    - { path: "$.payment_methods_supported",         contains: "x402" }
+    - { path: "$.payment_methods_supported",         contains: "stripe" }
+    - { path: "$.x402.facilitator_url",              matches: "^https://" }
+    - { path: "$.x402.supported_networks",           contains: "base" }
+    - { path: "$.x402.supported_assets[0].symbol",   equals: "USDC" }
+    - { path: "$.x402.supported_assets[0].address",  matches: "^0x[a-fA-F0-9]{40}$" }
+    - { path: "$.x402.supported_assets[0].decimals", equals: 6 }
+    - { path: "$.x402.splitter_contract",            matches: "^0x[a-fA-F0-9]{40}$" }
+    - { path: "$.x402.split_ratio",                  equals: "85/10/5" }
+    - { path: "$.x402.x402_version",                 equals: 1 }
+
+negative_cases:
+  - description: x402-only Hubs (no Stripe support) MAY emit payment_methods_supported = ["x402"]
+    expected_behavior: |
+      The MUST is "if x402 configured, advertise it"; not "if Stripe
+      configured, advertise it". Hubs MAY support x402-only and remain
+      conformant; their agent-guide MUST then list ["x402"] and not
+      ["stripe"].
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/05-discovery.md#441-payment-methods-supported-v110
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#73-discoverability

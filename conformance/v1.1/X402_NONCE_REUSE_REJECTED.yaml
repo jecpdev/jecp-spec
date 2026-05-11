@@ -1,0 +1,73 @@
+id: X402_NONCE_REUSE_REJECTED
+level: MUST
+spec_section: "ADR-0004; 06-x402-integration §3.4; 03-errors §3.8 (X402_SETTLEMENT_REUSED subcause nonce_reused)"
+threat_id: "Panel 2 §3.1 TM-D2 (replay flood)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST enforce a UNIQUE constraint on (payer, eip3009_nonce) in
+  the x402_settlements table. The same EIP-3009 nonce reused for a
+  different (agent_id, request_id) MUST return HTTP 409
+  X402_SETTLEMENT_REUSED with details.subcause = "nonce_reused".
+
+  This assertion submits the same X-Payment twice with DIFFERENT
+  request_ids. The first MUST succeed (or fail benignly on a separate
+  axis); the second MUST return 409.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-nonce-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: prime — first invocation with X-Payment (nonce N)
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-nonce-A-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "first" } }
+    expected:
+      status: 200
+
+request:
+  description: replay the SAME X-Payment with a DIFFERENT request_id → 409
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-nonce-B-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "second" } }
+
+expected:
+  status: 409
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_SETTLEMENT_REUSED" }
+    - { path: "$.error.details.subcause", equals: "nonce_reused" }
+    - { path: "$.next_action.type",       equals: "x402_settle" }
+
+postconditions:
+  - x402_settlements has exactly ONE row across both requests (the second was rejected at the INSERT ON CONFLICT)
+  - facilitator stub /settle was called at most once across both requests
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#34-idempotency-interaction

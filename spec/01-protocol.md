@@ -159,6 +159,10 @@ If neither header nor `mandate` provides credentials, the Hub MUST respond with 
 - **Required**: OPTIONAL
 - **Description**: Forward-compatibility hatch. Future versions MAY define keys here without breaking v1.0 clients. Hubs MUST ignore unknown extension keys but SHOULD log them for telemetry.
 
+### 3.3.1 The `payment` sibling field on 402 responses (v1.1.0)
+
+When the Hub returns HTTP 402 with `error.code = PAYMENT_REQUIRED` (03-errors.md §3.4) AND the resolved capability accepts x402 (04-manifest.md §5 `pricing.payment_methods`), the response envelope MUST carry an OPTIONAL sibling `payment` field next to `error` (NOT inside `error.details`). The field carries the x402 challenge per 06-x402-integration.md §2: an `accepts[]` array of payment-requirement objects (`stripe-wallet` first, `exact` second), a `ttl_seconds`, and a `next_action.type = "x402_settle"` recovery hint. Old SDKs that do not parse the `payment` field silently ignore it (additive OPTIONAL field; JSON parsers tolerate unknown keys) and continue to recover via the existing top-level `next_action.type = "topup"` hint. The agent retries with the `X-Payment` request header (06-x402-integration.md §3) to settle on-chain via the configured x402 facilitator.
+
 ### 3.4 Capability ID Resolution
 
 When `capability` lacks a `/`, the Hub resolves it as follows:

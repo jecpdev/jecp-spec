@@ -1,0 +1,60 @@
+{
+  "name": "x402-error-payment-invalid",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture for HTTP 422 X402_PAYMENT_INVALID with subcause=signature_invalid (the most common x402 failure: agent's signed authorization does not match the recovered ECDSA signer).",
+
+  "scenario": "agent signs with wrong key; facilitator /verify rejects; Hub does NOT call /settle",
+
+  "request": {
+    "method": "POST",
+    "path": "/v1/invoke",
+    "headers": {
+      "X-Agent-ID": "jdb_ag_x402test_invalidsig_001",
+      "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+      "X-Payment":  "<base64 encoded x402 envelope, signature does NOT recover to `from`>"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_invalidsig_001",
+      "capability": "jobdonebot/bg-remover-pro",
+      "action": "remove",
+      "input": { "image_url": "https://example.com/photo.jpg" }
+    }
+  },
+
+  "facilitator_calls": [
+    {
+      "endpoint": "/verify",
+      "response_body": {
+        "isValid": false,
+        "invalidReason": "signature_invalid",
+        "payer": null
+      }
+    }
+  ],
+
+  "expected_response": {
+    "status": 422,
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_invalidsig_001",
+      "status": "failed",
+      "error": {
+        "code": "X402_PAYMENT_INVALID",
+        "message": "X-Payment signature is invalid: signer 0xabc... does not match `from` 0xdef...",
+        "details": {
+          "subcause": "signature_invalid",
+          "facilitator_message": "EIP-712 recover yielded 0xabc..., expected 0xdef...",
+          "documentation_url": "https://jecp.dev/errors/x402_payment_invalid#signature_invalid"
+        }
+      }
+    }
+  },
+
+  "postconditions": [
+    "x402_settlements has NO row for this request_id",
+    "facilitator received exactly one /verify call; ZERO /settle calls",
+    "no on-chain transaction was submitted",
+    "Hub audit_log records the rejection with target='x402.payment_rejected'"
+  ]
+}

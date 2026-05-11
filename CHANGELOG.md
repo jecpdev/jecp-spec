@@ -6,6 +6,99 @@ The repository follows [SemVer](https://semver.org). Major versions break wire c
 
 ---
 
+## v1.1.0 — 2026-05-11 — x402 Integration
+
+Backward-compatible minor release. Adds Coinbase's [x402](https://x402.org) (HTTP 402 + USDC-on-Base micropayment) as a **second, parallel payment path** on `POST /v1/invoke`. The existing pre-funded Stripe wallet path is unchanged. v1.1.0 conformance does NOT require x402 support — Hubs that omit the x402 facilitator config remain conformant with the existing v1.0.x suite plus the `payment_methods`-honors-default invariant.
+
+The integration achieves three strategic goals: true sub-dollar invoke pricing (≤1% on-chain gas vs. ~5.9% Stripe top-up rake), agent-native UX (no human-in-the-loop top-up step for USDC-funded agents), and the load-bearing positioning claim "first agent-commerce protocol with on-chain atomic 85/10/5 revenue split" via the immutable `JecpSplitter` contract on Base mainnet.
+
+All five admiral-locked design decisions are documented in [ADR-0003 — x402 Integration](adr/0003-x402-integration.md). The idempotency-side extension (binding settlement uniqueness to the existing input-hash defense from ADR-0001) is documented in [ADR-0004 — Idempotency × x402](adr/0004-idempotency-x402.md).
+
+### New normative section
+
+- **[06-x402-integration.md](spec/06-x402-integration.md)** (new file) — full normative spec for the x402 path: 402 challenge envelope shape, `X-Payment` request header (base64 EIP-3009, ≤8 KB), Hub→facilitator interaction (verify before settle), `X-Payment-Response` reply header, trust model (single facilitator + cert pin + Ed25519 + reconciler + kill switch), capability manifest extension, Splitter contract integration, and backward-compat semantics. ~700 lines.
+- 01-protocol.md gains §3.3.1 — a 1-paragraph note about the OPTIONAL `payment` sibling field on the existing 402 error envelope, cross-referencing 06.
+
+### New error codes (5)
+
+Added to 03-errors.md as new §3.8. All carry a `details.subcause` from the closed registry §3.8.6 (19 subcauses total — same convention as `PROVENANCE_MISMATCH`).
+
+- **`X402_PAYMENT_INVALID`** (HTTP 422) — facilitator rejected the X-Payment payload (subcauses: `signature_invalid`, `signature_malleable`, `amount_mismatch`, `payto_mismatch`, `network_mismatch`, `asset_mismatch`, `expired`, `nonce_reused`, `unsupported_scheme`, `header_too_large`, `duplicate_payment_header`, `payload_decode_error`, `payment_capability_binding_violation`).
+- **`X402_NOT_ACCEPTED`** (HTTP 422) — capability does not declare x402, or kill switch engaged (subcauses: `capability_wallet_only`, `x402_disabled`, `network_unsupported`).
+- **`X402_SETTLEMENT_TIMEOUT`** (HTTP 504) — facilitator did not respond within timeout (subcauses: `facilitator_slow`, `chain_congested`).
+- **`X402_FACILITATOR_UNREACHABLE`** (HTTP 502) — Hub could not reach trusted facilitator (subcauses: `dns_fail`, `connection_refused`, `cert_pin_mismatch`, `signature_pin_mismatch`).
+- **`X402_SETTLEMENT_REUSED`** (HTTP 409) — UNIQUE-constraint conflict on `(payer, eip3009_nonce)` or `tx_hash` per ADR-0004 (subcauses: `tx_hash_seen`, `nonce_reused`).
+
+`PAYMENT_REQUIRED` (existing) gains a normative `payment` sibling field on x402-accepting capabilities. The new `next_action.type` value `"x402_settle"` is added to 03-errors.md §4.2.
+
+### Manifest extension
+
+- **04-manifest.md §5 `pricing.payment_methods`** — new OPTIONAL array, default `["stripe"]` when omitted, items in `["stripe", "x402"]`. Declares which payment methods an action accepts. Old manifests without the field continue to work unchanged (default to wallet-only behavior).
+
+### Discovery extension
+
+- **05-discovery.md §4.4.1** — new OPTIONAL `payment_methods_supported` top-level field on `/.well-known/agent-guide.json`. v1.1.0 reference Hubs SHOULD emit `["stripe", "x402"]` once the facilitator is configured. Includes a top-level `x402` block with `facilitator_url`, `supported_networks`, `supported_assets`, `splitter_contract`, `split_ratio`, `x402_version`, `spec_url`.
+- 05-discovery.md §6 — `/v1/capabilities` action object MAY include `payment_methods` per action (mirror of the manifest field).
+
+### Schemas
+
+- **`schemas/v1/payment-requirements.json`** (new) — JSON Schema 2020-12 for items in `payment.accepts[]`. Two `oneOf` variants: `stripe-wallet` (JECP-defined) and `exact` (x402 v1).
+
+### Conformance
+
+- **`conformance/v1.1/X402_*.yaml`** (new directory, 19 files) — one assertion per Panel 2 §7 named test:
+  - `X402_VERIFY_BEFORE_SETTLE`
+  - `X402_AMOUNT_MISMATCH_REJECTED`
+  - `X402_NONCE_REUSE_REJECTED`
+  - `X402_TX_HASH_REUSE_REJECTED`
+  - `X402_FACILITATOR_TIMEOUT_GRACEFUL`
+  - `X402_CERT_PIN_ENFORCED`
+  - `X402_RESPONSE_SIG_VERIFIED`
+  - `X402_SUNSET_HEADER_PRESENT`
+  - `X402_PAYMENT_METHODS_FIELD_OPTIONAL`
+  - `X402_OLD_SDK_GRACEFUL_DEGRADE`
+  - `X402_SPLITTER_ADDRESS_IN_PAYTO`
+  - `X402_RECONCILER_CHAIN_CONFIRM`
+  - `X402_RECONCILER_MISMATCH_FLAGGED`
+  - `X402_RECONCILER_ORPHAN_DETECTED`
+  - `X402_REFUND_RATE_LIMIT_ENFORCED`
+  - `X402_KILL_SWITCH_HALTS_NEW`
+  - `X402_KILL_SWITCH_PRESERVES_WALLET`
+  - `X402_PAYMENT_RESPONSE_HEADER`
+  - `X402_AGENT_GUIDE_DISCLOSES_X402`
+
+### Fixtures
+
+- **`fixtures/x402-*.json`** (new, 7 files) — golden request/response fixtures: `x402-happy-path-pure`, `x402-happy-path-wallet-fallback`, `x402-error-payment-invalid`, `x402-error-not-accepted`, `x402-error-settlement-timeout`, `x402-error-facilitator-unreachable`, `x402-error-settlement-reused`.
+
+### Architecture decisions
+
+- **[ADR-0003 — x402 Integration](adr/0003-x402-integration.md)** — full design rationale + the 5 admiral-locked decisions (single facilitator + cert pin + Ed25519; Splitter contract for atomic 85/10/5; 24h manual refund + Hub absorbs; Stripe-first `accepts[]` order; SDK auto-mode tries x402 aggressively). Documents 4 rejected alternatives (Hub-side KMS+multisig, Stripe co-charge bridging, Provider monthly settlement, custom facilitator with one-tx pull-and-split).
+- **[ADR-0004 — Idempotency × x402](adr/0004-idempotency-x402.md)** — extends ADR-0001 to cover x402: idempotency cache key composition adds SHA-256 of the X-Payment payload AND the resulting `tx_hash`; a dedicated `x402_settlements` table enforces UNIQUE on both `(payer, eip3009_nonce)` AND `tx_hash`. Closes Panel 2 `TM-D2` (Critical replay) and `TM-S4` (cross-capability replay).
+
+### SemVer justification
+
+All wire changes are additive (new OPTIONAL fields, new OPTIONAL headers, 5 new error codes, 1 new value on the open enum `billing.method`, 1 new `next_action.type`). No REQUIRED fields added. No types changed. No fields removed. No HTTP status remappings. No behavior change for capabilities that omit `payment_methods` (or declare `["stripe"]`). The wire-version string `"jecp": "1.0"` is unchanged through the v1.x line — only the spec document version bumps to 1.1.0.
+
+### Migration from v1.0.2
+
+- **No wire-breaking changes.** Existing clients (≤ SDK v0.7.x) continue to function unchanged. The new `payment` sibling field on 402 envelopes is silently ignored by old SDKs (additive OPTIONAL).
+- **Hub upgrade** requires running new database migrations (`x402_settlements`, `x402_refund_log`, `payment_methods` column on capabilities). Hubs that do NOT configure x402 (no facilitator URL, no Splitter address) remain v1.1.0-conformant — they simply never emit the new error codes and never advertise `"x402"` in any 402 response.
+- **Provider opt-in** is per-capability via `pricing.payment_methods: ["stripe", "x402"]` (recommended default for x402-aware Providers; `["x402"]` only is supported but bounces older agents at the 402-vs-401 hop).
+- **Agent SDKs** that want x402 SHOULD bump to `@jecpdev/sdk@0.8.0+` (ships `JecpClient({ payment: { mode, signer } })` + auto-fallback). Older SDKs continue using the wallet path on `["stripe", "x402"]` capabilities.
+
+### Reference implementation alignment (informative)
+
+Reference Hub implementation lands as part of jecp Hub Phase 1 / x402-impl Sprint:
+- Rust modules: `protocol/x402_types.rs`, `protocol/x402_verify.rs`, `services/x402_facilitator.rs`, `services/x402_reconciler.rs`, `services/splitter_registry.rs`, modified `routes/invoke.rs`.
+- Solidity contract: `JecpSplitter.sol` in separate repo `github.com/jecpdev/jecp-contracts` (Foundry; audit by Spearbit / Cure53 / Trail of Bits before mainnet).
+- SDK: `@jecpdev/sdk@0.8.0` with `JecpClient`, `createSigner`, `X402PaymentInvalidError`, `X402FacilitatorTimeoutError`, etc.
+- CLI: `@jecpdev/cli@0.7.0` with `wallet:link-usdc`, `--pay x402` flag, 4 new `doctor` checks.
+
+Tagged `jecp-spec@v1.1.0-rc1` after spec text complete; promoted to `jecp-spec@v1.1.0` after Hub deploy + Splitter audit clean + 19/19 conformance assertions pass.
+
+---
+
 ## v1.0.2 — 2026-05-10 — Errata
 
 Backward-compatible patch release. Closes the four credibility-killers surfaced by the 7-agent panel review of v1.0.1 plus the ADR-0001 architecture artifact.

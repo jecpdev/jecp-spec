@@ -1,0 +1,76 @@
+id: X402_TX_HASH_REUSE_REJECTED
+level: MUST
+spec_section: "ADR-0004; 06-x402-integration §3.4; 03-errors §3.8 (X402_SETTLEMENT_REUSED subcause tx_hash_seen)"
+threat_id: "Panel 2 §3.1 TM-D2 (replay flood across forged payloads claiming the same on-chain settlement)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST enforce a UNIQUE constraint on tx_hash in the
+  x402_settlements table. An attacker who hand-crafts an X-Payment
+  claiming an already-settled tx_hash (observed from a public log) MUST
+  receive HTTP 409 X402_SETTLEMENT_REUSED with details.subcause =
+  "tx_hash_seen".
+
+  This assertion uses a facilitator stub that returns the same tx_hash
+  for two distinct payloads (simulating either facilitator compromise or
+  Hub-side race). The Hub MUST detect the duplicate and reject.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-txhash-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: configure facilitator stub to return the SAME tx_hash for the next two /settle calls
+    note: |
+      The conformance harness exposes /admin/x402-stub/replay-tx-hash that
+      pins the next two /settle responses to a known tx_hash. Hub-under-test
+      operators must whitelist this admin endpoint OR provide an equivalent
+      stub control plane.
+
+  - description: first invocation succeeds with payload A
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.payload_A_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-txhash-A-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "first" } }
+    expected:
+      status: 200
+
+request:
+  description: second invocation with DIFFERENT payload but SAME (stubbed) tx_hash → 409
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.payload_B_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-txhash-B-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "second" } }
+
+expected:
+  status: 409
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_SETTLEMENT_REUSED" }
+    - { path: "$.error.details.subcause", equals: "tx_hash_seen" }
+    - { path: "$.error.details.tx_hash",  matches: "^0x[a-fA-F0-9]{64}$" }
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md

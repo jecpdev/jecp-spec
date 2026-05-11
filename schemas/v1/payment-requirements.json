@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jecp.dev/schemas/v1/payment-requirements.json",
+  "title": "JECP Payment Requirements (x402 integration)",
+  "description": "Schema for items inside the `payment.accepts[]` array on HTTP 402 PAYMENT_REQUIRED responses (06-x402-integration.md §2). Two variants: `stripe-wallet` (JECP-defined) and `exact` (x402 v1).",
+
+  "oneOf": [
+    { "$ref": "#/$defs/StripeWalletRequirement" },
+    { "$ref": "#/$defs/X402ExactRequirement" }
+  ],
+
+  "$defs": {
+    "StripeWalletRequirement": {
+      "type": "object",
+      "required": ["scheme", "amount_usd", "topup_url"],
+      "additionalProperties": true,
+      "properties": {
+        "scheme": {
+          "const": "stripe-wallet",
+          "description": "Identifies the Stripe-funded wallet payment path."
+        },
+        "amount_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "USD amount required for this invocation. Float in dollars (e.g., 0.20 = 20 US cents)."
+        },
+        "topup_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "URL the agent's UI redirects the user to in order to top up the wallet. SHOULD include a `return` query parameter that resumes the original invocation after top-up completes."
+        }
+      }
+    },
+
+    "X402ExactRequirement": {
+      "type": "object",
+      "required": [
+        "scheme",
+        "network",
+        "asset",
+        "max_amount_required",
+        "pay_to",
+        "resource",
+        "max_timeout_seconds"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "scheme": {
+          "const": "exact",
+          "description": "x402 v1 fixed-amount scheme. The only x402 scheme accepted in JECP v1.1.0."
+        },
+        "network": {
+          "type": "string",
+          "enum": ["base", "base-sepolia"],
+          "description": "Lowercase EVM network identifier. v1.1.0 mandates `base` for production. `base-sepolia` MAY be used in test mode (`JECP_TEST_MODE=true`)."
+        },
+        "asset": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$",
+          "description": "ERC-20 contract address. Base mainnet USDC = `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`."
+        },
+        "asset_symbol": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Human-readable symbol for the asset (e.g., 'USDC'). Informational; clients MUST trust the contract address, not the symbol."
+        },
+        "asset_decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 36,
+          "description": "Decimals of the asset (USDC = 6). Required to convert `max_amount_required` to a human-readable value."
+        },
+        "max_amount_required": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "Atomic units of the asset as a decimal string. NOT a USD float. USDC has 6 decimals → '200000' = 0.200 USDC. Hubs MUST emit this as a string to avoid JSON Number precision loss for amounts > 2^53."
+        },
+        "pay_to": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$",
+          "description": "EVM address that MUST receive the asset transfer. In v1.1.0 conformant Hubs MUST set this to the JECP Splitter contract address (06-x402-integration.md §8). MUST NOT be a Hub-controlled EOA, MUST NOT be a Provider-controlled EOA."
+        },
+        "resource": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "Absolute URL of the resource being accessed. Hubs MUST emit the canonical `/v1/invoke` URL."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Human-readable description of what is being paid for (e.g., 'Payment for capability jobdonebot/bg-remover-pro')."
+        },
+        "mime_type": {
+          "type": "string",
+          "default": "application/json",
+          "description": "Expected response MIME type. Echoed for x402-spec compliance."
+        },
+        "max_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "default": 60,
+          "description": "Maximum seconds the agent's signed authorization MAY remain valid. Hubs SHOULD emit 60."
+        },
+        "extra": {
+          "type": "object",
+          "required": ["splitter_capability_id", "facilitator_url"],
+          "additionalProperties": true,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "EIP-712 domain separator `name` field. USDC: `'USD Coin'`."
+            },
+            "version": {
+              "type": "string",
+              "description": "EIP-712 domain separator `version` field. USDC: `'2'`."
+            },
+            "splitter_capability_id": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{64}$",
+              "description": "32-byte (`0x`-prefixed 64-hex) identifier of the capability's split registration in the Splitter contract. Reproducible off-chain as `keccak256(utf8(provider_namespace + ':' + action_id))` per 06-x402-integration.md §8.2."
+            },
+            "facilitator_url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://",
+              "description": "URL of the x402 facilitator the Hub will use for verification. Allows agents to optimize wallet pre-funding."
+            }
+          }
+        }
+      }
+    }
+  }
+}

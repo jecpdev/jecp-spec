@@ -1,0 +1,64 @@
+id: X402_RECONCILER_MISMATCH_FLAGGED
+level: MUST
+spec_section: "06-x402-integration §6.2 (Reconciler mismatch state)"
+threat_id: "Panel 2 §2.3 TM-S6 (RPC lies); §3.4 TM-X4 (reorg)"
+severity: critical
+target: hub
+description: >
+  The reconciler MUST detect on-chain divergence between a
+  facilitator-attested settlement and the actual on-chain receipt
+  (e.g., value differs, recipient differs, blockHash changed). On
+  detection, the settlement MUST be marked `mismatched` and any pending
+  Provider payout MUST be frozen.
+
+  This assertion uses an instrumented RPC stub that returns a receipt
+  with a different `value` than the facilitator attested. The Hub's
+  reconciler MUST flip the settlement to `mismatched`, emit an operator
+  alert, and refuse to release any Provider payout until manual review.
+
+setup:
+  - description: register agent + submit invoke that the facilitator stub will attest
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-mismatch-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "mismatch" } }
+    expected:
+      status: 200
+    extract:
+      tx_hash: "$.billing.x402.settlement_tx"
+
+  - description: configure RPC stub to return DIFFERENT value than facilitator attested
+    note: harness control plane → /admin/base-rpc-stub/divergent-value $tx_hash
+
+  - description: wait for one reconciler tick
+    note: harness sleep 65s
+
+request:
+  description: re-fetch the settlement; expect status = mismatched
+  method: GET
+  path:   /v1/payments/${tx_hash}
+  headers:
+    X-Agent-ID: "${agent_id}"
+    X-API-Key:  "${api_key}"
+
+expected:
+  status: 200
+  body_jsonpath:
+    - { path: "$.status", equals: "mismatched" }
+
+postconditions:
+  - x402_settlements row has status = "mismatched"
+  - Hub audit_log records the divergence (operator P0 alert fires)
+  - any pending Provider payout for this tx_hash is frozen (not released)
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#62-reconciler

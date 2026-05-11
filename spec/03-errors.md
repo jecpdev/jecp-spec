@@ -195,7 +195,8 @@ A Hub MUST NOT emit `details.subcause` until after it has verified the Agent's `
 
 - **HTTP**: 402
 - **Cause**: Free tier exhausted, no wallet balance, no Mandate
-- **Retry-safe**: Yes (after topup)
+- **Retry-safe**: Yes (after topup or via x402 settlement)
+- **`payment` sibling**: When the resolved capability accepts x402 (per `payment_methods` on its manifest, 04-manifest.md §5), the Hub MUST attach an OPTIONAL sibling `payment` field on the error envelope (NOT inside `details`) carrying the x402 challenge. See 06-x402-integration.md §2 for the wire shape. Old SDKs that do not parse the `payment` field continue to use the wallet path via `next_action.type = "topup"`. New in v1.1.0.
 
 ### 3.5 Throttling (429)
 
@@ -333,6 +334,170 @@ Errors specific to composite actions defined in 04-manifest.md §5.2.
 - **Cause**: Capability handler returned output that does not match its declared `output_schema` (Provider bug)
 - **Retry-safe**: No
 
+### 3.8 x402 Settlement (4xx / 5xx)
+
+These error codes are introduced in spec v1.1.0 alongside the x402 integration (06-x402-integration.md). They fire only on x402-enabled Hubs that advertise `"x402"` in any capability's `payment_methods` (04-manifest.md §5). Hubs that do not configure x402 never emit these codes.
+
+The `details.subcause` field on each code is drawn from a **closed registry** (§3.8.6). Hubs MAY emit `details.subcause`; if present it MUST be one of the registered values. New values are added by spec patch only; clients MUST treat unknown subcauses as the parent code.
+
+#### `X402_PAYMENT_INVALID`
+
+- **HTTP**: 422
+- **Cause**: The agent's `X-Payment` header is structurally well-formed at the JECP layer but the facilitator (or the Hub's pre-facilitator validation) rejected the inner payload. Subcauses cover signature failure, amount mismatch, expiry, payee mismatch, header size violation, header duplication, malleable signatures, and binding violations.
+- **Retry-safe**: Yes (with a corrected `X-Payment`)
+- **`details`**: `{ "subcause": "<one of the values in §3.8.6>", "facilitator_message": "<optional verbatim from facilitator>", "documentation_url": "https://jecp.dev/errors/x402_payment_invalid#<subcause>" }`
+- **Recovery**: Per subcause; see §3.8.6.
+
+#### `X402_NOT_ACCEPTED`
+
+- **HTTP**: 422
+- **Cause**: The agent presented an `X-Payment` header but the resolved capability does not declare `"x402"` in its `pricing.payment_methods`. Also fires when the Hub's kill switch (`feature_flags.x402_enabled = false`, 06-x402-integration.md §6.3) is engaged and any agent attempts an x402 invocation.
+- **Retry-safe**: No (re-route to wallet path)
+- **`details`**: `{ "accepted": ["stripe"], "received": "x402", "subcause": "capability_wallet_only" | "x402_disabled" | "network_unsupported" }`
+- **Recovery**: Drop `X-Payment` and use the wallet path, OR pick a different capability.
+
+#### `X402_SETTLEMENT_TIMEOUT`
+
+- **HTTP**: 504
+- **Cause**: The Hub's facilitator call (`/verify` or `/settle`) did not return within the configured timeout (5 s default). Either the facilitator is slow or the underlying chain is congested.
+- **Retry-safe**: Yes (after backoff)
+- **`details`**: `{ "facilitator_url": "<https URL>", "elapsed_ms": <int>, "subcause": "facilitator_slow" | "chain_congested" }`
+- **Headers (MUST)**: `Retry-After: <integer-seconds>` per RFC 9110 §10.2.3.
+- **`next_action`**: SHOULD point the agent at the wallet (`stripe-wallet`) fallback path.
+
+#### `X402_FACILITATOR_UNREACHABLE`
+
+- **HTTP**: 502
+- **Cause**: The Hub could not reach the trusted facilitator. Distinct from `X402_SETTLEMENT_TIMEOUT` (which is a slow successful connection). Subcauses cover DNS failure, TCP refusal, TLS cert pin mismatch, and Ed25519 response signature pin mismatch.
+- **Retry-safe**: Yes (after backoff) — except subcauses `cert_pin_mismatch` and `signature_pin_mismatch` which indicate ongoing facilitator compromise; the operator MUST investigate before further x402 traffic flows.
+- **`details`**: `{ "facilitator_url": "<https URL>", "subcause": "dns_fail" | "connection_refused" | "cert_pin_mismatch" | "signature_pin_mismatch", "last_error": "<sanitized one-line>" }`
+- **Headers**: `Retry-After: <integer-seconds>` (SHOULD).
+- **`next_action`**: SHOULD point the agent at the wallet (`stripe-wallet`) fallback path.
+
+#### `X402_SETTLEMENT_REUSED`
+
+- **HTTP**: 409
+- **Cause**: The same settlement payload (or its EIP-3009 `nonce`, or the resulting `tx_hash`) was already recorded for a different `(agent_id, request_id)`. Per ADR-0004, the Hub maintains UNIQUE constraints on `(payer, eip3009_nonce)` AND on `tx_hash` in the `x402_settlements` table.
+- **Retry-safe**: No (use a fresh `X-Payment` with a fresh `nonce`)
+- **`details`**: `{ "tx_hash": "0x<64-hex>", "original_request_id": "<echoed>", "original_settled_at": "<RFC 3339>", "subcause": "tx_hash_seen" | "nonce_reused" }`
+- **`next_action`**: `{ "type": "x402_settle", "hint": "Generate a new EIP-3009 authorization with a fresh nonce, base64-encode the new envelope, and retry." }`
+
+##### Example: `X402_PAYMENT_INVALID`
+
+```json
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "jecp": "1.0",
+  "id": "req_abc123",
+  "status": "failed",
+  "error": {
+    "code": "X402_PAYMENT_INVALID",
+    "message": "X-Payment signature is invalid: signer 0xabc... does not match `from` 0xdef...",
+    "details": {
+      "subcause": "signature_invalid",
+      "facilitator_message": "EIP-712 recover yielded 0xabc..., expected 0xdef...",
+      "documentation_url": "https://jecp.dev/errors/x402_payment_invalid#signature_invalid"
+    }
+  }
+}
+```
+
+##### Example: `X402_SETTLEMENT_REUSED`
+
+```json
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{
+  "jecp": "1.0",
+  "id": "req_abc123",
+  "status": "failed",
+  "error": {
+    "code": "X402_SETTLEMENT_REUSED",
+    "message": "This X-Payment was already settled for request req_b4c5d6 at 2026-05-11T10:00:00Z. Construct a fresh authorization.",
+    "details": {
+      "tx_hash": "0x12345abcdef...",
+      "original_request_id": "req_b4c5d6",
+      "original_settled_at": "2026-05-11T10:00:00Z",
+      "subcause": "nonce_reused",
+      "documentation_url": "https://jecp.dev/errors/x402_settlement_reused"
+    }
+  },
+  "next_action": {
+    "type": "x402_settle",
+    "hint": "Generate a new EIP-3009 authorization with a fresh nonce, base64-encode the new envelope, and retry."
+  }
+}
+```
+
+##### Example: `X402_FACILITATOR_UNREACHABLE`
+
+```json
+HTTP/1.1 502 Bad Gateway
+Content-Type: application/json
+Retry-After: 30
+
+{
+  "jecp": "1.0",
+  "id": "req_abc123",
+  "status": "failed",
+  "error": {
+    "code": "X402_FACILITATOR_UNREACHABLE",
+    "message": "x402 facilitator at https://x402.org/facilitator returned 502 twice; settlement aborted. Retry in 30s or top up wallet to use the wallet payment method instead.",
+    "details": {
+      "facilitator_url": "https://x402.org/facilitator",
+      "subcause": "connection_refused",
+      "last_error": "upstream_5xx",
+      "documentation_url": "https://jecp.dev/errors/x402_facilitator_unreachable"
+    }
+  },
+  "next_action": {
+    "type": "topup",
+    "ui": "https://jecp.dev/account/topup",
+    "hint": "x402 settlement is currently degraded. Top up the wallet to use the alternative payment method."
+  }
+}
+```
+
+#### 3.8.6 `details.subcause` registry (closed)
+
+Per the spec convention established by `PROVENANCE_MISMATCH` (§3.1) and `URL_BLOCKED_SSRF` (`error-catalog/URL_BLOCKED_SSRF.md`), the x402 errors carry a closed-registry `subcause` field. New values MUST be added by spec patch. Clients MUST treat unknown subcauses as the parent code and preserve forward-compatibility.
+
+| Subcause | Parent code | When raised |
+|---|---|---|
+| `signature_invalid` | `X402_PAYMENT_INVALID` | Facilitator's ECDSA verify failed (recovered signer ≠ `from`). |
+| `signature_malleable` | `X402_PAYMENT_INVALID` | Non-canonical low-`s` signature form rejected (EIP-2). |
+| `amount_mismatch` | `X402_PAYMENT_INVALID` | Verified `value` < expected `max_amount_required`. |
+| `payto_mismatch` | `X402_PAYMENT_INVALID` | Verified `to` ≠ Splitter contract address from the matching `accepts[]` entry. |
+| `network_mismatch` | `X402_PAYMENT_INVALID` | Verified `network` ≠ claimed `network` (e.g., Sepolia signature against mainnet challenge). |
+| `asset_mismatch` | `X402_PAYMENT_INVALID` | Verified `asset` ≠ accepted asset (e.g., non-USDC ERC-20). |
+| `expired` | `X402_PAYMENT_INVALID` | EIP-3009 `validBefore < now()` or `validAfter > now()`. |
+| `nonce_reused` (under invalid) | `X402_PAYMENT_INVALID` | `auth_nonce` already in `x402_settlements` and rejected pre-facilitator. |
+| `unsupported_scheme` | `X402_PAYMENT_INVALID` | `payload.scheme` is not `"exact"`. |
+| `header_too_large` | `X402_PAYMENT_INVALID` | `X-Payment` header > 8 KB. |
+| `duplicate_payment_header` | `X402_PAYMENT_INVALID` | Multiple `X-Payment` headers (any case-folded variant) present. |
+| `payload_decode_error` | `X402_PAYMENT_INVALID` | Base64 decode failed, JSON parse failed, or top-level fields missing. |
+| `payment_capability_binding_violation` | `X402_PAYMENT_INVALID` | `X-Payment` valid for one capability replayed against a different capability with different price. |
+| `capability_wallet_only` | `X402_NOT_ACCEPTED` | Capability declares `payment_methods: ["stripe"]`. |
+| `x402_disabled` | `X402_NOT_ACCEPTED` | Hub's kill switch (`feature_flags.x402_enabled = false`) is engaged. |
+| `network_unsupported` | `X402_NOT_ACCEPTED` | Capability accepts x402 but not on the network the agent's payload targets. |
+| `facilitator_slow` | `X402_SETTLEMENT_TIMEOUT` | Facilitator did not respond within configured timeout. |
+| `chain_congested` | `X402_SETTLEMENT_TIMEOUT` | Facilitator confirmed timeout cause was Base chain backlog. |
+| `dns_fail` | `X402_FACILITATOR_UNREACHABLE` | DNS resolution of facilitator hostname failed. |
+| `connection_refused` | `X402_FACILITATOR_UNREACHABLE` | TCP connect to facilitator failed twice. |
+| `cert_pin_mismatch` | `X402_FACILITATOR_UNREACHABLE` | Facilitator TLS certificate SPKI hash does not match the pinned value. |
+| `signature_pin_mismatch` | `X402_FACILITATOR_UNREACHABLE` | Facilitator response signature does not verify against the pinned Ed25519 pubkey. |
+| `tx_hash_seen` | `X402_SETTLEMENT_REUSED` | Same settlement `tx_hash` already recorded for a different `(agent_id, request_id)`. |
+| `nonce_reused` (under reused) | `X402_SETTLEMENT_REUSED` | Same `(payer, eip3009_nonce)` tuple already recorded. |
+
+The `details.documentation_url` field, when present, is a deep-link of the form `https://jecp.dev/errors/<lowercase code>#<subcause>` and points to the same row in the catalog page.
+
+##### Subcause emission policy
+
+A Hub MUST NOT emit `details.subcause` until after it has authenticated the agent (via `X-API-Key` or equivalent). This prevents the subcause registry from acting as an enumeration oracle for unauthenticated callers — same rule as `PROVENANCE_MISMATCH` (§3.1).
+
 ## 4. `next_action` Object
 
 Errors that have a clear recovery path SHOULD include a `next_action` object with machine-readable guidance.
@@ -363,6 +528,7 @@ Additional code-specific fields are permitted under the `extensions` key.
 | `renew_mandate`   | `MANDATE_EXPIRED`                             | `description`                             |
 | `wait`            | `RATE_LIMITED`                                | `retry_after_seconds`                    |
 | `lookup_schema`   | `VALIDATION_FAILED`, `ACTION_NOT_FOUND`       | `schema_url`                             |
+| `x402_settle`     | `PAYMENT_REQUIRED` (when capability accepts x402), `X402_SETTLEMENT_REUSED` | `hint` (and may co-occur as `payment.next_action` per 06-x402-integration.md §2) |
 
 ### 4.3 Examples
 

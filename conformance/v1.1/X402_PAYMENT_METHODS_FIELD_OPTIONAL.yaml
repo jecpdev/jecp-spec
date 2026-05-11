@@ -1,0 +1,59 @@
+id: X402_PAYMENT_METHODS_FIELD_OPTIONAL
+level: MUST
+spec_section: "04-manifest §5 (Action.pricing.payment_methods); 06-x402-integration §7"
+threat_id: "n/a (backward compat invariant)"
+severity: medium
+target: hub
+description: >
+  A capability manifest that omits `payment_methods` from
+  Action.pricing MUST be accepted by the Hub at publish time, MUST
+  default to ["stripe"], and MUST cause /v1/invoke against that action
+  to behave exactly as v1.0 (wallet path only). An X-Payment header
+  presented against such an action MUST receive HTTP 422
+  X402_NOT_ACCEPTED with details.subcause = "capability_wallet_only".
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-default-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: present X-Payment to a capability with NO payment_methods declaration → 422
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-default-${TS}",
+      "capability": "content-factory", "action": "summarize",
+      "input": { "text": "hello world", "max_length": 10 } }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.error.code",                equals: "X402_NOT_ACCEPTED" }
+    - { path: "$.error.details.subcause",    equals: "capability_wallet_only" }
+    - { path: "$.error.details.accepted",    contains: "stripe" }
+    - { path: "$.error.details.received",    equals: "x402" }
+
+negative_cases:
+  - description: same capability without X-Payment → wallet path runs normally
+    expected_behavior: |
+      No X-Payment header → Hub treats as wallet-path invocation; no
+      X402_* error fires; either 200 (sufficient balance) or 402
+      PAYMENT_REQUIRED (insufficient balance) per existing v1.0 semantics.
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/04-manifest.md
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#7-capability-manifest-extension

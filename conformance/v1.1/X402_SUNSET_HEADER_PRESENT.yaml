@@ -1,0 +1,65 @@
+id: X402_SUNSET_HEADER_PRESENT
+level: MUST
+spec_section: "01-protocol §4.6 (capability sunset) intersected with 06-x402-integration §2 (x402-accepting capability)"
+threat_id: "n/a (deprecation hygiene composes correctly with x402)"
+severity: medium
+target: hub
+description: >
+  When a capability declares `sunset_at` in its manifest AND
+  `payment_methods: ["stripe", "x402"]`, an x402-path invocation against
+  the sunset capability MUST behave identically to a wallet-path
+  invocation: HTTP 410 CAPABILITY_DEPRECATED with the four normative
+  headers (Sunset, Deprecation, Link rel=deprecation, optional
+  successor-version Link). The sunset check MUST fire BEFORE the
+  facilitator round-trip — no on-chain settlement should occur for a
+  sunset capability.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-sunset-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke a sunset capability via x402 path → 410 + Sunset header
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-sunset-${TS}",
+      "capability": "jecp-test/x402-deprecated-echo", "action": "echo",
+      "input": { "msg": "sunset" } }
+
+expected:
+  status: 410
+  headers:
+    Sunset:
+      present: true
+      format:  imf-fixdate
+    Deprecation:
+      present: true
+      equals:  "true"
+    Link:
+      present: true
+      contains: 'rel="deprecation"'
+  body_jsonpath:
+    - { path: "$.error.code", equals: "CAPABILITY_DEPRECATED" }
+
+postconditions:
+  - facilitator stub recorded ZERO calls (sunset check fires before /verify)
+  - x402_settlements has NO row for this request_id
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/01-protocol.md#46-capability-sunset
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#2-payment-requirements-response

@@ -1,0 +1,104 @@
+{
+  "name": "x402-happy-path-pure",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture: agent presents valid X-Payment, facilitator verifies and settles, capability executes successfully, Hub emits X-Payment-Response. The reference happy path for an x402-only invocation.",
+
+  "scenario": "agent has signer + USDC pre-funded; capability accepts x402; everything works",
+
+  "request": {
+    "method": "POST",
+    "path": "/v1/invoke",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Agent-ID": "jdb_ag_x402test_happy_001",
+      "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+      "X-Payment":  "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHgxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3OCIsImF1dGhvcml6YXRpb24iOnsiZnJvbSI6IjB4QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUExIiwidG8iOiIweFNQTElUVEVSMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTIzNCIsInZhbHVlIjoiMjAwMDAwIiwidmFsaWRBZnRlciI6IjE3NjI2ODk2MDAiLCJ2YWxpZEJlZm9yZSI6IjE3NjI2ODk2NjAiLCJub25jZSI6IjB4ZGVhZGJlZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifX19"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_happy_001",
+      "capability": "jobdonebot/bg-remover-pro",
+      "action": "remove",
+      "input": { "image_url": "https://example.com/photo.jpg" }
+    }
+  },
+
+  "decoded_x_payment": {
+    "x402Version": 1,
+    "scheme": "exact",
+    "network": "base",
+    "payload": {
+      "signature": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678",
+      "authorization": {
+        "from":        "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1",
+        "to":          "0xSPLITTER000000000000000000000000000001234",
+        "value":       "200000",
+        "validAfter":  "1762689600",
+        "validBefore": "1762689660",
+        "nonce":       "0xdeadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567"
+      }
+    }
+  },
+
+  "facilitator_calls": [
+    {
+      "endpoint": "/verify",
+      "request_body": { "x402Version": 1, "paymentPayload": "<echoes decoded>", "paymentRequirements": "<from challenge>" },
+      "response_body": { "isValid": true, "invalidReason": null, "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1" }
+    },
+    {
+      "endpoint": "/settle",
+      "request_body": { "x402Version": 1, "paymentPayload": "<same>", "paymentRequirements": "<same>" },
+      "response_body": {
+        "success": true,
+        "errorReason": null,
+        "transaction": "0xc0ffee0000000000000000000000000000000000000000000000000000000001",
+        "network": "base",
+        "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1"
+      }
+    }
+  ],
+
+  "expected_response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Payment-Response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YzBmZmVlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxIiwibmV0d29yayI6ImJhc2UiLCJwYXllciI6IjB4QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUExIn0=",
+      "Access-Control-Expose-Headers": "X-Payment-Response, X-Request-Id"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_happy_001",
+      "status": "completed",
+      "result": {
+        "capability": "jobdonebot/bg-remover-pro",
+        "action": "remove",
+        "output": { "result_url": "https://artifacts.jecp.dev/transparent/abc123.png" }
+      },
+      "billing": {
+        "method": "x402",
+        "cost_usdc": 0.20,
+        "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
+        "x402": {
+          "settlement_tx": "0xc0ffee0000000000000000000000000000000000000000000000000000000001",
+          "network": "base",
+          "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1",
+          "facilitator": "https://x402.org/facilitator"
+        }
+      },
+      "execution": {
+        "duration_ms": 1820,
+        "engine": "jecp-v1.1.0",
+        "trust_tier": "silver"
+      }
+    }
+  },
+
+  "postconditions": [
+    "x402_settlements has one row with status='facilitator_attested', tx_hash=0xc0ffee...0001",
+    "facilitator received exactly one /verify followed by exactly one /settle",
+    "Splitter contract emitted PaymentSplit event with capability_id, payer, amount=200000, providerAmount=170000, hubAmount=20000, reserveAmount=10000",
+    "reconciler will transition status to 'chain_confirmed' within 60s"
+  ]
+}

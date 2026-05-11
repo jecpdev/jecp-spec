@@ -1,0 +1,65 @@
+{
+  "name": "x402-error-facilitator-unreachable",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture for HTTP 502 X402_FACILITATOR_UNREACHABLE with subcause=cert_pin_mismatch (Hub's TLS handshake to the facilitator failed because the presented cert's SPKI hash does not match the pinned value — simulated MITM or unauthorized cert rotation).",
+
+  "scenario": "facilitator presents wrong TLS cert; Hub aborts at handshake, fails closed",
+
+  "request": {
+    "method": "POST",
+    "path": "/v1/invoke",
+    "headers": {
+      "X-Agent-ID": "jdb_ag_x402test_certpin_001",
+      "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+      "X-Payment":  "<base64 encoded valid x402 envelope>"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_certpin_001",
+      "capability": "jobdonebot/bg-remover-pro",
+      "action": "remove",
+      "input": { "image_url": "https://example.com/photo.jpg" }
+    }
+  },
+
+  "facilitator_calls": [
+    {
+      "endpoint": "/verify",
+      "tls_handshake": "FAIL — presented cert SPKI sha256=<observed> ≠ pinned=<expected>"
+    }
+  ],
+
+  "expected_response": {
+    "status": 502,
+    "headers": {
+      "Retry-After": "30"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_certpin_001",
+      "status": "failed",
+      "error": {
+        "code": "X402_FACILITATOR_UNREACHABLE",
+        "message": "x402 facilitator at https://x402.org/facilitator presented an unexpected TLS certificate; settlement aborted. Operator has been notified.",
+        "details": {
+          "facilitator_url": "https://x402.org/facilitator",
+          "subcause": "cert_pin_mismatch",
+          "last_error": "tls_cert_spki_pin_mismatch",
+          "documentation_url": "https://jecp.dev/errors/x402_facilitator_unreachable"
+        }
+      },
+      "next_action": {
+        "type": "topup",
+        "ui": "https://jecp.dev/account/topup",
+        "hint": "x402 settlement is currently unavailable due to a security signal on the facilitator. Top up the wallet to continue."
+      }
+    }
+  },
+
+  "postconditions": [
+    "x402_settlements has NO row for this request_id",
+    "no on-chain transaction was submitted",
+    "Hub audit_log records `x402.facilitator.cert_pin_mismatch` with the observed and expected SPKI hashes (the operator alert is P0 — facilitator may be compromised)",
+    "operator runbook: investigate before re-enabling x402; flip kill switch via feature_flags.x402_enabled = false until cleared"
+  ]
+}

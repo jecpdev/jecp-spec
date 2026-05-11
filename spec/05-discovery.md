@@ -103,6 +103,35 @@ All other sections are RECOMMENDED for richness but optional. Agents MUST gracef
 
 The Hub MUST refresh content within 30 minutes of capability changes. Cache headers SHOULD be `public, max-age=1800, s-maxage=3600`.
 
+### 4.4.1 Payment methods supported (v1.1.0)
+
+Hubs that configure x402 (06-x402-integration.md) MUST publish a top-level OPTIONAL `payment_methods_supported` array enumerating which methods the Hub supports across its catalog. v1.1.0 reference Hubs SHOULD emit `["stripe", "x402"]` once the x402 facilitator is configured. Hubs that do not configure x402 SHOULD emit `["stripe"]` (or omit the field, which clients MUST then interpret as `["stripe"]`).
+
+```json
+{
+  "payment_methods_supported": ["stripe", "x402"],
+  "x402": {
+    "facilitator_url": "https://x402.org/facilitator",
+    "facilitator_operator": "coinbase",
+    "supported_networks": ["base"],
+    "supported_assets": [
+      {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "symbol": "USDC",
+        "decimals": 6,
+        "network": "base"
+      }
+    ],
+    "splitter_contract": "0x<JECP Splitter address>",
+    "split_ratio": "85/10/5",
+    "x402_version": 1,
+    "spec_url": "https://x402.org/spec"
+  }
+}
+```
+
+The `payment_methods_supported` field is the discovery surface that lets agents pre-decide which path to use without trial-and-error. Per-action declarations live on the manifest (04-manifest.md §5 `pricing.payment_methods`); the agent-guide field is the Hub-wide superset.
+
 ### 4.5 Conformance
 
 Conformant Hubs at v1.0.2 and later **MUST** publish a `/.well-known/agent-guide.json` document that satisfies the JSON Schema at `https://jecp.dev/schemas/v1/agent-guide.json` (a frozen mirror of [`schemas/v1/agent-guide.json`](../schemas/v1/agent-guide.json) in this repository). The document MUST include, at minimum:
@@ -167,6 +196,7 @@ The text MUST be ≤ 50 KB. Larger content SHOULD link out to `/llms-full.txt` (
           "id": "summarize",
           "description": "Summarize text",
           "price_usdc": 0.003,
+          "payment_methods": ["stripe"],
           "input_schema":  { /* JSON Schema */ },
           "output_schema": { /* JSON Schema */ }
         }
@@ -180,6 +210,8 @@ The text MUST be ≤ 50 KB. Larger content SHOULD link out to `/llms-full.txt` (
   "next_cursor": null
 }
 ```
+
+Each action object MAY include a `payment_methods` array (new in v1.1.0; default `["stripe"]` when omitted) declaring which payment methods the action accepts. See 04-manifest.md §5 (`pricing.payment_methods`) and 06-x402-integration.md §7 for normative semantics. Old SDKs that do not parse this field continue to use the wallet path on capabilities that accept it.
 
 ### 6.2 Pagination
 

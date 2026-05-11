@@ -1,0 +1,64 @@
+id: X402_VERIFY_BEFORE_SETTLE
+level: MUST
+spec_section: "06-x402-integration §4 (Hub MUST call /verify before /settle)"
+threat_id: "Panel 2 §3.1 TM-D2 (replay/idempotency); §2.2 TM-S1 (forged payload)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST call the facilitator's /verify endpoint BEFORE its /settle
+  endpoint. /verify is a cheap signature check that catches malformed
+  payloads without committing on-chain gas; /settle is the irreversible
+  on-chain commit. A Hub that skips /verify and goes straight to /settle
+  burns chain gas on bogus payloads AND loses the cheapest defense against
+  forged signatures.
+
+  This assertion uses an instrumented facilitator stub that records the
+  ORDER of inbound requests. The Hub MUST emit POST /verify before POST
+  /settle for the same paymentPayload. If the order is reversed, or
+  /settle is called without a preceding /verify, the assertion FAILS.
+
+  Conformance harness pre-condition: a `JECP_X402_FACILITATOR_URL` is
+  configured on the Hub-under-test pointing at the conformance stub
+  (`https://conformance.jecp.dev/x402-stub`).
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-verify-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke an x402-accepting capability with a valid X-Payment
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-verify-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "verify-before-settle" } }
+
+expected:
+  status: 200
+  facilitator_call_order:
+    - { endpoint: "/verify", first: true }
+    - { endpoint: "/settle", second: true, only_if_verify_succeeded: true }
+
+postconditions:
+  - x402_settlements has exactly one row for this request_id
+  - facilitator stub records exactly one /verify and one /settle call
+  - facilitator stub records /verify timestamp < /settle timestamp
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#4-hub--facilitator-interaction
+  - https://x402.org/spec

@@ -1,0 +1,66 @@
+id: X402_CERT_PIN_ENFORCED
+level: MUST
+spec_section: "06-x402-integration §6.1; 03-errors §3.8 (X402_FACILITATOR_UNREACHABLE subcause cert_pin_mismatch)"
+threat_id: "Panel 2 §2.2 TM-S2 (spoofed/MITM facilitator)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST pin the facilitator's TLS certificate by SPKI SHA-256
+  hash. A facilitator presenting a different certificate (simulated MITM
+  or unauthorized cert rotation) MUST cause the Hub to abort the
+  connection and return HTTP 502 X402_FACILITATOR_UNREACHABLE with
+  details.subcause = "cert_pin_mismatch".
+
+  This assertion uses an alternate facilitator stub at
+  https://conformance.jecp.dev/x402-stub-mitm presenting a cert whose
+  SPKI hash does not match the pinned value. Hub-under-test MUST refuse
+  the connection at the TLS layer.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-certpin-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: re-route Hub's facilitator URL to the MITM stub for this assertion
+    note: |
+      Operator-side action (not API-controllable per §6.1). Conformance
+      runner sets `JECP_X402_FACILITATOR_URL` to the MITM stub before
+      starting the Hub-under-test container, then resets after the
+      assertion finishes.
+
+request:
+  description: invoke with X-Payment, expect 502 with cert_pin_mismatch
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-certpin-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "cert-pin" } }
+
+expected:
+  status: 502
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_FACILITATOR_UNREACHABLE" }
+    - { path: "$.error.details.subcause", equals: "cert_pin_mismatch" }
+
+postconditions:
+  - x402_settlements has NO row for this request_id
+  - Hub audit_log records the cert-pin rejection (operator alert fires)
+  - separate wallet-path invocation succeeds (kill-switch is not auto-engaged)
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-single-facilitator--cert-pin--ed25519-v110
+  - https://jecp.dev/spec/v1.1/03-errors.md#x402_facilitator_unreachable

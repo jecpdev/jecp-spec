@@ -1,0 +1,62 @@
+id: X402_REFUND_RATE_LIMIT_ENFORCED
+level: MUST
+spec_section: "06-x402-integration §4.5; ADR-0003 decision C (refund DoS defense)"
+threat_id: "Panel 2 §3.2 TM-EC3 (DoS via repeated refund requests)"
+severity: high
+target: hub
+description: >
+  The Hub MUST enforce a per-agent refund rate limit of 10 refunds per
+  24 hours. The 11th refund request from the same agent within a 24h
+  window MUST be held for investigation rather than auto-processed. This
+  defends against a malicious agent invoking a known-failing capability
+  repeatedly to drain Hub's USDC absorption budget.
+
+  This assertion fires 10 refund requests within a short window (each
+  succeeds), then the 11th, which MUST return HTTP 429 RATE_LIMITED with
+  details indicating the refund-specific limit OR a custom 422 status
+  with a refund-specific code (Hub implementations MAY pick either; both
+  are conformant).
+
+setup:
+  - description: register agent + simulate 10 successful refund requests
+    note: |
+      Each refund request follows the runbook flow at
+      jecp.dev/runbooks/x402-refund. Conformance runner uses the
+      `/v1/refunds/request` endpoint (operator-controlled) to spawn 10
+      pending refunds.
+
+request:
+  description: 11th refund request from same agent in 24h → rate-limited or held
+  method: POST
+  path:   /v1/refunds/request
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    { "tx_hash": "${fixtures.x402.refund_tx_hash_11}",
+      "reason":  "capability execution failed" }
+
+expected:
+  any_of:
+    - status: 429
+      headers:
+        Retry-After:
+          present: true
+          format:  integer-seconds
+      body_jsonpath:
+        - { path: "$.error.code", in: ["RATE_LIMITED", "REFUND_RATE_LIMITED"] }
+    - status: 422
+      body_jsonpath:
+        - { path: "$.error.code",                equals: "REFUND_INVESTIGATION_REQUIRED" }
+        - { path: "$.error.details.threshold",   equals: 10 }
+        - { path: "$.error.details.window",      equals: "24h" }
+
+postconditions:
+  - the 11th refund request is NOT auto-processed (no Hub treasury debit)
+  - operator alert is recorded with the agent_id for investigation
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#45-atomicity
+  - https://jecp.dev/spec/v1.1/adr/0003-x402-integration.md

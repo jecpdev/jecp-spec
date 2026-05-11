@@ -1,0 +1,68 @@
+id: X402_KILL_SWITCH_PRESERVES_WALLET
+level: MUST
+spec_section: "06-x402-integration §6.3 (Kill switch — wallet path unaffected)"
+threat_id: "n/a (bulkhead invariant per PATH-TO-NO1 K3)"
+severity: high
+target: hub
+description: >
+  When the x402 kill switch is engaged, the wallet (Stripe) path MUST
+  remain fully operational with no latency or correctness regression.
+  This assertion measures wallet-path p99 latency on N requests with
+  the kill switch ON, and compares to a baseline measured with the
+  switch OFF. The two MUST be within 10% of each other (wallet path
+  must not be dragged down by the disabled x402 path).
+
+setup:
+  - description: register a fresh agent + top up wallet to a non-trivial balance
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-bulkhead-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: baseline — measure wallet-path p99 over 100 requests with kill switch OFF
+    note: harness control plane → /admin/feature-flags x402_enabled=true; run k6 100 RPS for 10s
+
+  - description: flip kill switch ON
+    request:
+      method: POST
+      path:   /admin/feature-flags
+      body: '{ "flag": "x402_enabled", "value": false }'
+
+request:
+  description: measure wallet-path p99 over 100 requests with kill switch ON
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-bulkhead-${TS}-${ITER}",
+      "capability": "content-factory", "action": "summarize",
+      "input": { "text": "hi", "max_length": 10 } }
+  repetitions: 100
+  rate: 10/s
+
+expected:
+  status: 200
+  metrics:
+    p99_latency_ms:
+      formula: "abs(killswitch_on.p99 - baseline.p99) / baseline.p99 < 0.10"
+      reason:  "wallet-path p99 with kill switch on must be within 10% of baseline (no cross-path interference)"
+
+cleanup:
+  - description: re-enable x402
+    request:
+      method: POST
+      path:   /admin/feature-flags
+      body: '{ "flag": "x402_enabled", "value": true }'
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-kill-switch
+  - https://jecp.dev/spec/v1.0/conformance/v1.0/JECP-OPS-MUST-BULKHEAD-ISOLATION.yaml

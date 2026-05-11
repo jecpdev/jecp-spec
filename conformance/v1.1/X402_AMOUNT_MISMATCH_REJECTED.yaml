@@ -1,0 +1,60 @@
+id: X402_AMOUNT_MISMATCH_REJECTED
+level: MUST
+spec_section: "06-x402-integration §4 (failure handling); 03-errors §3.8 (X402_PAYMENT_INVALID subcause amount_mismatch)"
+threat_id: "Panel 2 §2.1 TM-T3 (amount tampering)"
+severity: critical
+target: hub
+description: >
+  After facilitator /verify returns isValid=true, the Hub MUST recompute
+  the expected amount from the resolved capability and reject if the
+  verified payment amount is less than the expected amount. An attacker
+  who pays $0.001 must NOT be able to invoke a $0.20 capability simply
+  because the facilitator confirms the (smaller) payment landed.
+
+  This assertion presents an X-Payment whose verified `value` is
+  intentionally below the capability's price. The Hub MUST reject with
+  HTTP 422 X402_PAYMENT_INVALID + details.subcause = "amount_mismatch".
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-amount-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke $0.20 capability with X-Payment that authorizes only $0.001
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.underpriced_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-amount-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "amount-mismatch" } }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.jecp",                            equals: "1.0" }
+    - { path: "$.status",                          equals: "failed" }
+    - { path: "$.error.code",                      equals: "X402_PAYMENT_INVALID" }
+    - { path: "$.error.details.subcause",          equals: "amount_mismatch" }
+    - { path: "$.error.details.documentation_url", contains: "/errors/x402_payment_invalid" }
+
+postconditions:
+  - x402_settlements has NO row for this request_id
+  - facilitator stub recorded /verify but NOT /settle (the amount check fires before /settle)
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#44-failure-handling
+  - https://jecp.dev/spec/v1.1/03-errors.md#x402_payment_invalid

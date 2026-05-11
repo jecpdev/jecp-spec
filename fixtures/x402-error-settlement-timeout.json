@@ -1,0 +1,67 @@
+{
+  "name": "x402-error-settlement-timeout",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture for HTTP 504 X402_SETTLEMENT_TIMEOUT with subcause=facilitator_slow (facilitator did not respond within the configured 5s timeout).",
+
+  "scenario": "facilitator response delayed beyond Hub's timeout — Hub aborts cleanly without on-chain commitment",
+
+  "request": {
+    "method": "POST",
+    "path": "/v1/invoke",
+    "headers": {
+      "X-Agent-ID": "jdb_ag_x402test_timeout_001",
+      "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+      "X-Payment":  "<base64 encoded valid x402 envelope>"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_timeout_001",
+      "capability": "jobdonebot/bg-remover-pro",
+      "action": "remove",
+      "input": { "image_url": "https://example.com/photo.jpg" }
+    }
+  },
+
+  "facilitator_calls": [
+    {
+      "endpoint": "/verify",
+      "behavior": "no response after 8 seconds (exceeds Hub's 5s timeout)"
+    }
+  ],
+
+  "expected_response": {
+    "status": 504,
+    "headers": {
+      "Retry-After": "30"
+    },
+    "body": {
+      "jecp": "1.0",
+      "id": "req_x402_timeout_001",
+      "status": "failed",
+      "error": {
+        "code": "X402_SETTLEMENT_TIMEOUT",
+        "message": "x402 facilitator at https://x402.org/facilitator did not respond within 5s; settlement aborted.",
+        "details": {
+          "facilitator_url": "https://x402.org/facilitator",
+          "elapsed_ms": 5000,
+          "subcause": "facilitator_slow",
+          "documentation_url": "https://jecp.dev/errors/x402_settlement_timeout"
+        }
+      },
+      "next_action": {
+        "type": "topup",
+        "ui": "https://jecp.dev/account/topup",
+        "api": "https://jecp.dev/api/agents/topup",
+        "method": "POST",
+        "hint": "x402 settlement is currently degraded. Top up the wallet to use the alternative payment method."
+      }
+    }
+  },
+
+  "postconditions": [
+    "x402_settlements has NO row for this request_id",
+    "no on-chain transaction was submitted",
+    "Better Stack receives a `x402.facilitator.timeout` metric increment",
+    "if circuit breaker threshold (5 timeouts in 30s) is reached, subsequent x402 invokes return X402_FACILITATOR_UNREACHABLE with subcause=facilitator_circuit_open until the circuit closes"
+  ]
+}

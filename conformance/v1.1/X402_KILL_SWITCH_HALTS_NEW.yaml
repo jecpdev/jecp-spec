@@ -1,0 +1,90 @@
+id: X402_KILL_SWITCH_HALTS_NEW
+level: MUST
+spec_section: "06-x402-integration §6.3 (Kill switch)"
+threat_id: "Panel 2 §2.2 TM-E3 (facilitator vendor compromise)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST expose a runtime feature flag (e.g.,
+  feature_flags.x402_enabled) that disables all new x402 invocations
+  without redeploy. The flag flip MUST take effect within 60 seconds.
+  When false: 402 responses MUST omit the "exact" entry from
+  payment.accepts[]; X-Payment requests MUST return HTTP 422
+  X402_NOT_ACCEPTED with details.subcause = "x402_disabled".
+
+  This assertion flips the flag via the Hub's admin endpoint, waits 60
+  seconds, and verifies both behaviors.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-killswitch-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: flip feature_flags.x402_enabled to false
+    request:
+      method: POST
+      path:   /admin/feature-flags
+      headers:
+        Content-Type:   application/json
+        Authorization:  "Bearer ${admin_token}"
+      body: |
+        { "flag": "x402_enabled", "value": false }
+
+  - description: wait for propagation (≤60s)
+    note: harness sleep 65s
+
+request:
+  description: present X-Payment to an x402-accepting capability after kill switch
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-killswitch-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "kill" } }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_NOT_ACCEPTED" }
+    - { path: "$.error.details.subcause", equals: "x402_disabled" }
+
+negative_cases:
+  - description: 402 challenge (no X-Payment) MUST also exclude x402 entry
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-killswitch-noxp-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "kill-no-xp" } }
+    expected:
+      status: 402
+      body_jsonpath:
+        - { path: "$.payment.accepts[?(@.scheme=='exact')]", absent: true }
+
+cleanup:
+  - description: re-enable x402 for subsequent assertions
+    request:
+      method: POST
+      path:   /admin/feature-flags
+      body: '{ "flag": "x402_enabled", "value": true }'
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-kill-switch

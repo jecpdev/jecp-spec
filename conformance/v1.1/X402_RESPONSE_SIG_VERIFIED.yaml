@@ -1,0 +1,60 @@
+id: X402_RESPONSE_SIG_VERIFIED
+level: MUST
+spec_section: "06-x402-integration §6.1; 03-errors §3.8 (X402_FACILITATOR_UNREACHABLE subcause signature_pin_mismatch)"
+threat_id: "Panel 2 §2.2 TM-S2 (forged facilitator response without signature verify)"
+severity: critical
+target: hub
+description: >
+  The Hub MUST verify the facilitator's response body against the pinned
+  Ed25519 public key on every /verify and /settle response. A response
+  with a forged signature (simulating facilitator compromise where the
+  attacker controls the body but not the signing key) MUST cause the Hub
+  to reject and return HTTP 502 X402_FACILITATOR_UNREACHABLE with
+  details.subcause = "signature_pin_mismatch".
+
+  This assertion uses a facilitator stub configured to return responses
+  signed with a different Ed25519 key than the one pinned on the Hub.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-sigpin-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: configure facilitator stub to sign responses with WRONG Ed25519 key
+    note: harness control plane → /admin/x402-stub/forge-signature
+
+request:
+  description: invoke with X-Payment, expect 502 with signature_pin_mismatch
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-sigpin-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "sig-pin" } }
+
+expected:
+  status: 502
+  body_jsonpath:
+    - { path: "$.error.code",             equals: "X402_FACILITATOR_UNREACHABLE" }
+    - { path: "$.error.details.subcause", equals: "signature_pin_mismatch" }
+
+postconditions:
+  - x402_settlements has NO row for this request_id
+  - Hub did NOT trust facilitator's reported tx_hash (forged) — no settlement recorded
+  - Hub audit_log records the signature-pin rejection (operator P0 alert fires)
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-single-facilitator--cert-pin--ed25519-v110

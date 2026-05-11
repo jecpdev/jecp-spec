@@ -1,0 +1,83 @@
+{
+  "name": "x402-error-settlement-reused",
+  "spec_version": "1.1.0",
+  "description": "Golden fixture for HTTP 409 X402_SETTLEMENT_REUSED with subcause=nonce_reused (same X-Payment payload submitted across two different request_ids; the second is rejected by the (payer, eip3009_nonce) UNIQUE constraint per ADR-0004).",
+
+  "scenario": "attacker (or buggy client) replays a previously-settled X-Payment against a different request_id",
+
+  "step_1_first_request_succeeds": {
+    "request": {
+      "method": "POST",
+      "path": "/v1/invoke",
+      "headers": {
+        "X-Agent-ID": "jdb_ag_x402test_replay_001",
+        "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+        "X-Payment":  "<base64 X-Payment with nonce=0xdeadbeef...>"
+      },
+      "body": {
+        "jecp": "1.0",
+        "id": "req_x402_replay_first_001",
+        "capability": "jobdonebot/bg-remover-pro",
+        "action": "remove",
+        "input": { "image_url": "https://example.com/photo.jpg" }
+      }
+    },
+    "expected_response": {
+      "status": 200,
+      "body": {
+        "billing": {
+          "method": "x402",
+          "x402": { "settlement_tx": "0xabc123..." }
+        }
+      }
+    }
+  },
+
+  "step_2_replay_with_different_request_id_fails": {
+    "request": {
+      "method": "POST",
+      "path": "/v1/invoke",
+      "headers": {
+        "X-Agent-ID": "jdb_ag_x402test_replay_001",
+        "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
+        "X-Payment":  "<SAME base64 X-Payment with nonce=0xdeadbeef...>"
+      },
+      "body": {
+        "jecp": "1.0",
+        "id": "req_x402_replay_second_001",
+        "capability": "jobdonebot/bg-remover-pro",
+        "action": "remove",
+        "input": { "image_url": "https://example.com/different-photo.jpg" }
+      }
+    },
+    "expected_response": {
+      "status": 409,
+      "body": {
+        "jecp": "1.0",
+        "id": "req_x402_replay_second_001",
+        "status": "failed",
+        "error": {
+          "code": "X402_SETTLEMENT_REUSED",
+          "message": "This X-Payment was already settled for request req_x402_replay_first_001 at 2026-05-11T10:00:00Z. Construct a fresh authorization.",
+          "details": {
+            "tx_hash": "0xabc123...",
+            "original_request_id": "req_x402_replay_first_001",
+            "original_settled_at": "2026-05-11T10:00:00Z",
+            "subcause": "nonce_reused",
+            "documentation_url": "https://jecp.dev/errors/x402_settlement_reused"
+          }
+        },
+        "next_action": {
+          "type": "x402_settle",
+          "hint": "Generate a new EIP-3009 authorization with a fresh nonce, base64-encode the new envelope, and retry."
+        }
+      }
+    }
+  },
+
+  "postconditions": [
+    "x402_settlements has exactly ONE row across both requests (the second request was rejected at the INSERT ON CONFLICT step BEFORE any facilitator call)",
+    "facilitator received exactly one /verify and one /settle (for the first request only)",
+    "no double-spend on-chain — the EIP-3009 nonce is also single-use at the asset contract layer; the Hub's UNIQUE constraint is the early defense-in-depth line"
+  ]
+}

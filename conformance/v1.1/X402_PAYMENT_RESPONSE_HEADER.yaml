@@ -1,0 +1,76 @@
+id: X402_PAYMENT_RESPONSE_HEADER
+level: MUST
+spec_section: "06-x402-integration §5 (X-Payment-Response header)"
+threat_id: "n/a (x402 spec compliance)"
+severity: high
+target: hub
+description: >
+  Every 2xx response that consumed an x402 payment MUST carry an
+  X-Payment-Response response header containing base64(JSON) of the
+  receipt (success, transaction, network, payer). The same data MUST
+  also appear in the response body's billing.x402 sub-object. The
+  X-Payment-Response header MUST be included in
+  Access-Control-Expose-Headers on CORS-eligible responses.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-resp-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke an x402 capability with valid X-Payment, expect 200 + response header
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+    Origin:       "https://conformance.jecp.dev"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-resp-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "response-header" } }
+
+expected:
+  status: 200
+  headers:
+    X-Payment-Response:
+      present: true
+      base64_decodes_to_json: true
+      json_schema:
+        type: object
+        required: [success, transaction, network, payer]
+        properties:
+          success:     { const: true }
+          transaction: { type: string, pattern: "^0x[a-fA-F0-9]{64}$" }
+          network:     { type: string, enum: ["base", "base-sepolia"] }
+          payer:       { type: string, pattern: "^0x[a-fA-F0-9]{40}$" }
+    Access-Control-Expose-Headers:
+      present: true
+      contains: "X-Payment-Response"
+    Cache-Control:
+      present: true
+      contains: "no-store"
+  body_jsonpath:
+    - { path: "$.billing.method",                equals: "x402" }
+    - { path: "$.billing.x402.settlement_tx",    matches: "^0x[a-fA-F0-9]{64}$" }
+    - { path: "$.billing.x402.network",          enum: ["base", "base-sepolia"] }
+    - { path: "$.billing.x402.payer",            matches: "^0x[a-fA-F0-9]{40}$" }
+    - { path: "$.billing.x402.facilitator",      matches: "^https://" }
+
+invariants:
+  - body.billing.x402.settlement_tx MUST equal base64-decoded(headers.X-Payment-Response).transaction
+  - body.billing.x402.network MUST equal base64-decoded(headers.X-Payment-Response).network
+  - body.billing.x402.payer MUST equal base64-decoded(headers.X-Payment-Response).payer
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#5-x-payment-response-response-header

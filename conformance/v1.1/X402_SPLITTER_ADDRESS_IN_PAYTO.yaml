@@ -1,0 +1,59 @@
+id: X402_SPLITTER_ADDRESS_IN_PAYTO
+level: MUST
+spec_section: "06-x402-integration §8.3 (Splitter wire surface)"
+threat_id: "Panel 2 §2.1 TM-T4 (payTo address binding)"
+severity: critical
+target: hub
+description: >
+  The pay_to field on every x402 payment-requirement entry in a 402
+  response MUST equal the Hub's published Splitter contract address. It
+  MUST NOT be a Hub-controlled EOA, MUST NOT be a Provider-controlled
+  EOA, MUST NOT be a fee-collection address, MUST NOT change between
+  requests for the same capability. An attacker who manages to influence
+  pay_to could redirect Provider payouts to themselves; this assertion
+  proves the address is hard-pinned to the Splitter.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-payto-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+  - description: read the Hub's published Splitter address from agent-guide
+    request:
+      method: GET
+      path:   /.well-known/agent-guide.json
+    extract:
+      splitter_address: "$.x402.splitter_contract"
+
+request:
+  description: trigger a 402 challenge on an x402-accepting capability
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-payto-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "pay-to" } }
+
+expected:
+  status: 402
+  body_jsonpath:
+    - { path: "$.payment.accepts[?(@.scheme=='exact')].pay_to", equals: "${splitter_address}" }
+    - { path: "$.payment.accepts[?(@.scheme=='exact')].pay_to", matches: "^0x[a-fA-F0-9]{40}$" }
+
+postconditions:
+  - the published splitter_address from agent-guide matches the pay_to in EVERY accepts[] entry whose scheme is "exact" across multiple capabilities
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#8-splitter-contract-integration
