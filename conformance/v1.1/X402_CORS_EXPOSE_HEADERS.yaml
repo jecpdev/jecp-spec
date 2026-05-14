@@ -1,0 +1,101 @@
+id: X402_CORS_EXPOSE_HEADERS
+level: MUST
+spec_section: "06-x402-integration §11.2 (Access-Control-Expose-Headers)"
+threat_id: "n/a (x402 spec compliance / browser agent UX)"
+severity: high
+target: hub
+description: >
+  Every response from POST /v1/invoke MUST carry
+  Access-Control-Expose-Headers including X-Payment-Response,
+  X-Request-Id, Retry-After, and WWW-Authenticate. Browsers strip
+  non-default response headers from JS access by default; without
+  explicit exposure, browser-based agents using the Fetch API cannot
+  read the receipt, correlate the request, back off on facilitator
+  delays, or surface the challenge to the user. The CORS preflight
+  (OPTIONS) response MUST list the same four headers.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-cors-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke an x402 capability with valid X-Payment, expect CORS expose
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+    Origin:       "https://conformance.jecp.dev"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-cors-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "cors-expose" } }
+
+expected:
+  status: 200
+  headers:
+    Access-Control-Expose-Headers:
+      present: true
+      contains_all:
+        - "X-Payment-Response"
+        - "X-Request-Id"
+        - "Retry-After"
+        - "WWW-Authenticate"
+
+negative_cases:
+  - description: CORS preflight (OPTIONS) MUST also advertise the four headers
+    request:
+      method: OPTIONS
+      path:   /v1/invoke
+      headers:
+        Origin:                         "https://conformance.jecp.dev"
+        Access-Control-Request-Method:  "POST"
+        Access-Control-Request-Headers: "X-Agent-ID, X-API-Key, X-Payment, Content-Type"
+    expected:
+      status_in: [200, 204]
+      headers:
+        Access-Control-Expose-Headers:
+          present: true
+          contains_all:
+            - "X-Payment-Response"
+            - "X-Request-Id"
+            - "Retry-After"
+            - "WWW-Authenticate"
+        Access-Control-Allow-Headers:
+          present: true
+          contains: "X-Payment"
+
+  - description: 402 challenge MUST also carry expose-headers
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        Origin:       "https://conformance.jecp.dev"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-cors-402-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "cors-expose-402" } }
+    expected:
+      status: 402
+      headers:
+        Access-Control-Expose-Headers:
+          present: true
+          contains: "X-Payment-Response"
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#112-access-control-expose-headers--must-on-every-v1invoke-response
+  - https://fetch.spec.whatwg.org/#cors-protocol-exposed-response-header-names

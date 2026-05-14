@@ -99,6 +99,43 @@ Tagged `jecp-spec@v1.1.0-rc1` after spec text complete; promoted to `jecp-spec@v
 
 ---
 
+## v1.1.0-rc2 — 2026-05-13 — HIGH header findings from audit-A (H-2)
+
+Backward-compatible spec patch. Closes the three HIGH-severity header findings (audit-A H3 / H4 / H5) deferred from the v1.1.0 critical sweep. No wire-breaking changes; all additions are normative MUSTs on existing surfaces.
+
+### Spec additions
+
+- **06-x402-integration.md §11 — Response headers (normative)** (NEW). Consolidates three HTTP response header MUSTs that previously lived only as fragmented mentions in §2.1, §3.3, §4.4, and §5:
+  - **§11.1 `Cache-Control: no-store`** — MUST on EVERY `POST /v1/invoke` response (200 wallet, 200 x402-settled, 402 challenge, 422 / 409 / 502 / 504 x402 errors, and streaming). Closes the "Cloudflare Page Rule on `*.jecp.dev` replays a paid result" gap (audit-A A-H3).
+  - **§11.2 `Access-Control-Expose-Headers`** — MUST on EVERY `/v1/invoke` response: `X-Payment-Response, X-Request-Id, Retry-After, WWW-Authenticate`. Same expose list MUST appear on the CORS preflight (OPTIONS) response. Without this, browser-based agents using `fetch()` cannot read the x402 receipt header (audit-A A-H4).
+  - **§11.3 `WWW-Authenticate`** — MUST on every 402 response per RFC 7235. Value shape:
+    - x402-only capability: `x402, scheme="exact", network="base"`
+    - both stripe + x402: `x402, Bearer`
+    - stripe-only (legacy / kill-switch): `Bearer` (SHOULD)
+  - **§11.4 worked example** — a complete 402 challenge + 200 x402-settled wire trace including all three headers.
+
+### New conformance assertions (3)
+
+- **`conformance/v1.1/X402_CACHE_CONTROL_NO_STORE.yaml`** — asserts `Cache-Control: no-store` on 200 + 402 + 422.
+- **`conformance/v1.1/X402_CORS_EXPOSE_HEADERS.yaml`** — asserts the four-header expose list on 200 + 402 + CORS preflight (OPTIONS).
+- **`conformance/v1.1/X402_WWW_AUTHENTICATE_HEADER.yaml`** — asserts `WWW-Authenticate: x402, Bearer` for stripe+x402 capabilities and `x402, scheme="exact", network="base"` for x402-only.
+
+The conformance suite count rises from 19 to **22** for v1.1.0 Hubs that advertise x402. Hubs that do not advertise x402 remain exempt from all x402-prefixed assertions; the three new headers are conditional on `/v1/invoke` shape, not on x402 advertisement.
+
+### Backward compatibility
+
+- All three additions are response-side MUSTs only. Existing API clients see the same status codes, the same response bodies, and the same `X-Payment-Response` payload shape — only with three additional response headers attached. JSON-parsing clients tolerate unknown response headers per HTTP semantics.
+- The header values are stable across the v1.x line; v1.2 may extend them additively (e.g., a `realm` parameter) but MUST NOT remove or reshape them.
+
+### Reference implementation status
+
+- Reference Hub (`JobDoneBot/jecp` v1.1.0-rc2 build) adds `protocol/x402_response_headers.rs` (~80 LOC) as the single point of policy enforcement. All four sites in `routes/invoke.rs` (sync 200 wallet, sync 200 x402-settled, x402 error envelope builder, streaming response + preflight error) plus the streaming preflight error path call into the helper. CORS layer (`middleware/cors.rs`) now sets `expose_headers` on the layer itself so the preflight response advertises the same list. New Rust tests: 6.
+- SDK: no changes required. The receipt-decoding path in `@jecpdev/sdk` already reads `X-Payment-Response` directly; the new CORS expose simply makes the header reachable from browser fetch() callers.
+
+Tagged `jecp-spec@v1.1.0-rc2` after these three header MUSTs and the cert-pin restoration patch land in the reference Hub. Promotion to `jecp-spec@v1.1.0` follows when both rc2 patches pass conformance.
+
+---
+
 ## v1.0.2 — 2026-05-10 — Errata
 
 Backward-compatible patch release. Closes the four credibility-killers surfaced by the 7-agent panel review of v1.0.1 plus the ADR-0001 architecture artifact.

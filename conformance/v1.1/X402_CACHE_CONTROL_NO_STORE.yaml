@@ -1,0 +1,95 @@
+id: X402_CACHE_CONTROL_NO_STORE
+level: MUST
+spec_section: "06-x402-integration §11.1 (Cache-Control: no-store)"
+threat_id: "n/a (x402 spec compliance / CDN paid-call leak)"
+severity: high
+target: hub
+description: >
+  Every response from POST /v1/invoke MUST carry Cache-Control: no-store.
+  This covers 200 wallet, 200 x402-settled, 402 challenges, 422 / 409 /
+  502 / 504 x402 errors, and streaming (text/event-stream) responses. A
+  cached x402-settled response replayed from a CDN would deliver the
+  paid result without a second settlement; the Hub's idempotency cache
+  prevents replay within the Hub process but does not bind
+  intermediaries. Cache-Control: no-store closes this gap.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-cache-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke an x402 capability with valid X-Payment, expect 200 + no-store
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+    X-Payment:    "${fixtures.x402.valid_payment_b64}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-cache-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "cache-control" } }
+
+expected:
+  status: 200
+  headers:
+    Cache-Control:
+      present: true
+      contains: "no-store"
+
+negative_cases:
+  - description: 402 challenge (no X-Payment) MUST also carry no-store
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-cache-402-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "cache-control-402" } }
+    expected:
+      status: 402
+      headers:
+        Cache-Control:
+          present: true
+          contains: "no-store"
+
+  - description: 422 X402_NOT_ACCEPTED MUST also carry no-store
+    setup_note: present X-Payment on a wallet-only capability
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-cache-422-${TS}",
+          "capability": "jecp-test/wallet-only", "action": "noop",
+          "input": {} }
+    expected:
+      status: 422
+      headers:
+        Cache-Control:
+          present: true
+          contains: "no-store"
+      body_jsonpath:
+        - { path: "$.error.code", equals: "X402_NOT_ACCEPTED" }
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#111-cache-control-no-store--must-on-every-v1invoke-response
+  - https://datatracker.ietf.org/doc/html/rfc9111#section-5.2.2.5

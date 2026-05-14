@@ -1,0 +1,85 @@
+id: X402_WWW_AUTHENTICATE_HEADER
+level: MUST
+spec_section: "06-x402-integration §11.3 (WWW-Authenticate on 402)"
+threat_id: "n/a (x402 spec compliance / RFC 7235)"
+severity: high
+target: hub
+description: >
+  Every 402 Payment Required response from POST /v1/invoke MUST carry
+  a WWW-Authenticate header per RFC 7235. The challenge value depends
+  on which payment schemes the capability accepts (after the runtime
+  kill switch from §6.3):
+    - x402-only:           `x402, scheme="exact", network="base"`
+    - x402 + stripe wallet: `x402, Bearer`
+  Non-JSON-aware HTTP clients (curl users, RFC 7235-aware proxies,
+  generic HTTP libraries) MUST be able to recognize the response as an
+  authentication challenge without parsing the JECP error envelope.
+
+setup:
+  - description: register a fresh agent
+    request:
+      method: POST
+      path:   /api/agents/register
+      headers: { Content-Type: application/json }
+      body: |
+        { "name": "conformance-x402-wwwauth-${TS}", "agent_type": "conformance" }
+    extract:
+      agent_id: "$.agent_id"
+      api_key:  "$.api_key"
+
+request:
+  description: invoke a stripe+x402 capability without X-Payment, expect 402 + WWW-Authenticate
+  method: POST
+  path:   /v1/invoke
+  headers:
+    Content-Type: application/json
+    X-Agent-ID:   "${agent_id}"
+    X-API-Key:    "${api_key}"
+  body: |
+    { "jecp": "1.0", "id": "conformance-x402-wwwauth-${TS}",
+      "capability": "jecp-test/x402-echo", "action": "echo",
+      "input": { "msg": "wwwauth-both" } }
+
+expected:
+  status: 402
+  headers:
+    WWW-Authenticate:
+      present: true
+      contains_all:
+        - "x402"
+        - "Bearer"
+
+negative_cases:
+  - description: x402-only capability emits scheme + network params
+    setup_note: capability declares payment_methods=["x402"]
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-wwwauth-only-${TS}",
+          "capability": "jecp-test/x402-only", "action": "noop",
+          "input": {} }
+    expected:
+      status: 402
+      headers:
+        WWW-Authenticate:
+          present: true
+          regex: '^x402, scheme="exact", network="base(-sepolia)?"$'
+
+invariants:
+  - The WWW-Authenticate header value MUST start with "x402" whenever the
+    capability accepts x402.
+  - When both stripe and x402 are accepted, the value MUST also include
+    "Bearer".
+  - When the runtime kill switch (feature_flags.x402_enabled = false)
+    suppresses x402, the 402 response MUST NOT advertise "x402" in
+    WWW-Authenticate and SHOULD emit "Bearer" alone.
+
+introduced_in: v1.1.0
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#113-www-authenticate--must-on-every-402-payment-required-response
+  - https://datatracker.ietf.org/doc/html/rfc7235#section-4.1

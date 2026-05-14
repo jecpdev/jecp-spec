@@ -1,8 +1,10 @@
 id: X402_CERT_PIN_ENFORCED
-level: SHOULD
+level: MUST
 v110_status: deferred
-v110_errata: "ADR-0005 — cert pin downgraded to SHOULD in v1.1.0. Full enforcement targets v1.1.1 with rustls custom ServerCertVerifier."
-spec_section: "06-x402-integration §6.1; 03-errors §3.8 (X402_FACILITATOR_UNREACHABLE subcause cert_pin_mismatch)"
+v110_errata: "ADR-0005 — cert pin downgraded to SHOULD in v1.1.0. Full enforcement landed in v1.1.1 with rustls custom ServerCertVerifier (see ADR-0005 Resolution)."
+v111_status: enforced
+v111_resolution: "Hub v1.1.1 ships PinnedSpkiVerifier (jecp/src/services/x402_cert_pin.rs) that delegates chain validation to WebPkiServerVerifier and asserts a constant-time SPKI SHA-256 match. Mismatch → TlsError::General → X402_FACILITATOR_UNREACHABLE with subcause = cert_pin_mismatch."
+spec_section: "06-x402-integration §6.1 item 4; 03-errors §3.8 (X402_FACILITATOR_UNREACHABLE subcause cert_pin_mismatch)"
 threat_id: "Panel 2 §2.2 TM-S2 (spoofed/MITM facilitator)"
 severity: high
 target: hub
@@ -63,6 +65,8 @@ postconditions:
   - separate wallet-path invocation succeeds (kill-switch is not auto-engaged)
 
 introduced_in: v1.1.0
+enforced_in: v1.1.1
 references:
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-single-facilitator--cert-pin--ed25519-v110
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-single-facilitator--cert-pin--ed25519-v110--v111
   - https://jecp.dev/spec/v1.1/03-errors.md#x402_facilitator_unreachable
+  - https://jecp.dev/adr/0005-cert-pin-errata.md

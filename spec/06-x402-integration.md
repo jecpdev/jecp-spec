@@ -344,19 +344,19 @@ Settled responses MUST emit `Cache-Control: no-store`. A cached x402-settled res
 
 ## 6. Trust Model
 
-### 6.1 Single-facilitator + cert pin + Ed25519 (v1.1.0)
+### 6.1 Single-facilitator + cert pin + Ed25519 (v1.1.0 / v1.1.1)
 
-v1.1.0 conformant Hubs configured to support x402 MUST:
+v1.1.0+ conformant Hubs configured to support x402 MUST:
 
 1. Pin the facilitator URL at boot via operator-controlled environment variable (e.g., `JECP_X402_FACILITATOR_URL`). The URL MUST NOT be agent-controllable.
 2. Pass the facilitator URL through the composite SSRF defense (ADR-0002 / 02-authentication.md §9.7.1) at boot. If the URL fails the pipeline (resolves to a deny CIDR, scheme ≠ `https`, etc.) the Hub MUST refuse to start.
 3. Pin the facilitator's Ed25519 response signing public key (e.g., `JECP_X402_FACILITATOR_PUBKEY`). Verify the signature on every `/verify` and `/settle` response body before trusting any field. Mismatch = HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "signature_pin_mismatch"`.
 
-v1.1.0 conformant Hubs SHOULD:
+v1.1.1+ conformant Hubs MUST (downgraded to SHOULD in v1.1.0 only; restored to MUST in v1.1.1 per ADR-0005 resolution):
 
-4. Pin the facilitator's TLS certificate by SPKI SHA-256 (e.g., `JECP_X402_FACILITATOR_CERT_PIN`). Mismatch at TLS handshake = abort + alert + emit HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "cert_pin_mismatch"`. See ADR-0005 for the rationale on downgrading this from MUST to SHOULD in v1.1.0; full enforcement targets v1.1.1 via a `rustls` custom `ServerCertVerifier`.
+4. Pin the facilitator's TLS certificate by SPKI SHA-256 (e.g., `JECP_X402_FACILITATOR_CERT_PIN`) and enforce the pin inside a custom TLS verifier that runs **after** standard chain validation. Mismatch at TLS handshake = abort + alert + emit HTTP 502 `X402_FACILITATOR_UNREACHABLE` with `details.subcause = "cert_pin_mismatch"`. The reference Rust implementation (Hub v1.1.1+) installs a `rustls::client::danger::ServerCertVerifier` that delegates to `WebPkiServerVerifier` for chain/hostname/expiry, then compares the leaf cert's SPKI SHA-256 against the pinned value with a constant-time check (see ADR-0005 Resolution + `jecp/src/services/x402_cert_pin.rs`). v1.1.0 Hubs that ship cert pin as SHOULD remain conformant to v1.1.0 only; v1.1.1+ Hubs MUST enforce.
 
-Multi-facilitator quorum (Panel 2's preferred model) is **deferred to v1.2** per ADR-0003. v1.1.0's locked baseline is signature verify + reconciler + SSRF guard (see §6.3); cert pin lands in v1.1.1 per ADR-0005.
+Multi-facilitator quorum (Panel 2's preferred model) is **deferred to v1.2** per ADR-0003. v1.1.1's locked baseline is signature verify + cert pin enforced + reconciler + SSRF guard (see §6.3). See ADR-0005 for the full v1.1.0 → v1.1.1 history.
 
 ### 6.2 Reconciler
 
@@ -654,7 +654,7 @@ No REQUIRED fields added. No types changed. No fields removed. No HTTP status re
 
 ## 10. Conformance Requirements
 
-Conformant Hubs at v1.1.0 that advertise `"x402"` in any `payment_methods` declaration MUST pass the 19 conformance assertions in `conformance/v1.1/x402-*.yaml`:
+Conformant Hubs at v1.1.0 that advertise `"x402"` in any `payment_methods` declaration MUST pass the 22 conformance assertions in `conformance/v1.1/X402_*.yaml`:
 
 - `X402_VERIFY_BEFORE_SETTLE` — `/verify` is called before `/settle`.
 - `X402_AMOUNT_MISMATCH_REJECTED` — verified amount < expected → 422.
@@ -675,10 +675,109 @@ Conformant Hubs at v1.1.0 that advertise `"x402"` in any `payment_methods` decla
 - `X402_KILL_SWITCH_PRESERVES_WALLET` — kill switch flip does NOT regress wallet-path latency or correctness.
 - `X402_PAYMENT_RESPONSE_HEADER` — settled 200 carries `X-Payment-Response`.
 - `X402_AGENT_GUIDE_DISCLOSES_X402` — `/.well-known/agent-guide.json` includes `payment_methods_supported = [..., "x402"]` when x402 is enabled.
+- `X402_CACHE_CONTROL_NO_STORE` — every `/v1/invoke` response carries `Cache-Control: no-store` (v1.1.0-rc2; see §11.1).
+- `X402_CORS_EXPOSE_HEADERS` — every `/v1/invoke` response (and the CORS preflight) advertises `X-Payment-Response, X-Request-Id, Retry-After, WWW-Authenticate` in `Access-Control-Expose-Headers` (v1.1.0-rc2; see §11.2).
+- `X402_WWW_AUTHENTICATE_HEADER` — every 402 response carries `WWW-Authenticate` with the correct scheme value for the capability's accepted payment methods (v1.1.0-rc2; see §11.3).
 
-Conformant Hubs that do NOT advertise `"x402"` (i.e., x402 is not configured) are exempt from all 19 assertions but MUST still pass the existing v1.0 suite.
+Conformant Hubs that do NOT advertise `"x402"` (i.e., x402 is not configured) are exempt from the 19 x402-feature assertions but MUST still pass the existing v1.0 suite. The three header assertions (`X402_CACHE_CONTROL_NO_STORE`, `X402_CORS_EXPOSE_HEADERS`, `X402_WWW_AUTHENTICATE_HEADER`) bind to `/v1/invoke` shape and apply universally; non-x402 Hubs MAY skip the X-Payment-bearing setup steps and assert only on the 402 and 200-wallet branches.
 
-## 11. References
+## 11. Response headers (normative)
+
+This section consolidates the three normative HTTP response headers introduced across §2.1, §3.3, §4.4, and §5. They are restated here in one place so implementers can verify their handler emits all three on every relevant response without cross-referencing four sections. Three additional conformance assertions in `conformance/v1.1/X402_*.yaml` cover this surface; see §10.
+
+### 11.1 `Cache-Control: no-store` — MUST on every `/v1/invoke` response
+
+Every response from `POST /v1/invoke` MUST carry `Cache-Control: no-store`. This includes:
+
+- 200 OK responses on the wallet path (no x402 was settled).
+- 200 OK responses on the x402 path (where `X-Payment-Response` is also emitted).
+- 402 Payment Required challenges.
+- 422 Unprocessable Entity errors (`X402_NOT_ACCEPTED`, `X402_PAYMENT_INVALID`).
+- 409 Conflict errors (`X402_SETTLEMENT_REUSED`, `DUPLICATE_REQUEST`).
+- 502 Bad Gateway (`X402_FACILITATOR_UNREACHABLE`).
+- 504 Gateway Timeout (`X402_SETTLEMENT_TIMEOUT`).
+- Streaming (text/event-stream) responses on the same endpoint.
+
+Rationale: a paid call delivered from CDN cache replays revenue to the agent and skips settlement. The Hub's per-request idempotency cache prevents this within the Hub process, but does not bind intermediaries; `Cache-Control: no-store` does. Both §2.1 (already MUST on 402) and §5.2 (already MUST on 200) are restated here as a single Hub-wide rule covering every status.
+
+### 11.2 `Access-Control-Expose-Headers` — MUST on every `/v1/invoke` response
+
+Every response from `POST /v1/invoke` MUST carry:
+
+```
+Access-Control-Expose-Headers: X-Payment-Response, X-Request-Id, Retry-After, WWW-Authenticate
+```
+
+These are the four x402-relevant non-default response headers a browser-based agent reads via the Fetch API. Without explicit exposure, the browser strips them from JS access (CORS specification §10) — the agent cannot decode the receipt (`X-Payment-Response`), correlate its request (`X-Request-Id`), back off on facilitator delays (`Retry-After`), or surface the challenge to the user (`WWW-Authenticate`).
+
+The CORS preflight (OPTIONS) response MUST list the same four headers in `Access-Control-Expose-Headers`. Hubs SHOULD also include `X-Payment` in `Access-Control-Allow-Headers` so browser-based agents may send the request header on preflighted requests.
+
+The header value MAY be emitted as a single comma-separated string (as shown) or as repeated header values; both forms are RFC 7230-equivalent.
+
+### 11.3 `WWW-Authenticate` — MUST on every 402 Payment Required response
+
+Every 402 response from `POST /v1/invoke` MUST carry a `WWW-Authenticate` header per RFC 7235. The value depends on which payment methods the capability accepts (after applying the runtime kill switch from §6.3):
+
+- When x402 is the ONLY accepted scheme (capability declares `payment_methods: ["x402"]` AND `feature_flags.x402_enabled = true`):
+
+  ```
+  WWW-Authenticate: x402, scheme="exact", network="base"
+  ```
+
+  The `network` parameter MUST match the network the `exact` entry advertises in `payment.accepts[]` (typically `"base"`; `"base-sepolia"` in test).
+
+- When both Stripe wallet and x402 are accepted (`payment_methods: ["stripe", "x402"]` or any superset):
+
+  ```
+  WWW-Authenticate: x402, Bearer
+  ```
+
+  No realm parameter is required here — `Bearer` is the JECP wallet path (Stripe-funded API-key auth from §2 / 02-authentication.md), and emitting a realm on the wallet half can collide with proxy auth realms.
+
+- When only Stripe is accepted (`payment_methods: ["stripe"]` or omitted; legacy / kill-switch state), Hubs SHOULD emit:
+
+  ```
+  WWW-Authenticate: Bearer
+  ```
+
+  This is a SHOULD (not MUST) for backward compatibility with v1.0 Hubs that did not emit `WWW-Authenticate` on the legacy wallet 402.
+
+Rationale: non-JSON-aware HTTP clients (curl users, RFC 7235-aware proxies, generic HTTP libraries) MUST be able to recognize the response as an authentication challenge without parsing the JECP error envelope. The `x402` scheme name is registered ad-hoc per x402.org v1; the JECP working group will pursue IANA registration in a future version.
+
+### 11.4 Worked example
+
+A 402 response on a capability that accepts both methods:
+
+```http
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+Cache-Control: no-store
+Retry-After: 30
+WWW-Authenticate: x402, Bearer
+Access-Control-Expose-Headers: X-Payment-Response, X-Request-Id, Retry-After, WWW-Authenticate
+
+{
+  "jecp": "1.0",
+  "id": "req_abc123",
+  "status": "failed",
+  "error": { /* PAYMENT_REQUIRED */ },
+  "payment": { /* accepts[]: stripe-wallet, exact (x402) */ }
+}
+```
+
+A 200 OK on the x402-settled path:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+X-Payment-Response: eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4Li4uIn0=
+Access-Control-Expose-Headers: X-Payment-Response, X-Request-Id, Retry-After, WWW-Authenticate
+
+{ "jecp": "1.0", "id": "req_abc123", "status": "completed", "result": { ... }, "billing": { "method": "x402", ... } }
+```
+
+## 12. References
 
 - ADR-0003 — x402 Integration (the design rationale + admiral-locked decisions)
 - ADR-0004 — Idempotency × x402 (extension of ADR-0001 to cover x402 settlements)
@@ -695,6 +794,6 @@ Conformant Hubs that do NOT advertise `"x402"` (i.e., x402 is not configured) ar
 - [RFC 7235](https://datatracker.ietf.org/doc/html/rfc7235) — `WWW-Authenticate` header semantics
 - [USDC on Base](https://basescan.org/token/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913) — canonical Circle-issued contract
 
-## 12. Authors
+## 13. Authors
 
 JECP Working Group. Contact: hello@jecp.dev.
