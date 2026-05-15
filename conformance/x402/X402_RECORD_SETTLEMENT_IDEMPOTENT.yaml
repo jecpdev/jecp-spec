@@ -1,0 +1,110 @@
+id: X402_RECORD_SETTLEMENT_IDEMPOTENT
+level: MUST
+assertion_id: X402_RECORD_SETTLEMENT_IDEMPOTENT
+category: correctness
+applies_to: [hub]
+spec_section: "06-x402-integration §6.3 (Hub keeper idempotency); ADR-0004 (idempotency-x402); Sprint 12 QA P0 #1"
+threat_id: "Panel 2 §3.1 TM-D2 (replay flood); QA-Pro Sprint 12 audit finding #1 (double-charge risk)"
+severity: critical
+target: hub
+priority: must
+evidence_url: "https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md"
+description: >
+  The Hub keeper's recordSettlement driver MUST treat each (chain_id,
+  tx_hash, log_index) tuple as a single-shot idempotency key. The SQL
+  UNIQUE constraint (chain_id, tx_hash, log_index) on the
+  x402_settlements table MUST reject a second insert attempt with a
+  database error that the keeper service translates into a no-op (NOT a
+  500). The on-chain recordSettlement transaction MUST be submitted
+  exactly once.
+
+  Why this matters: the keeper service runs as a tight reconciler loop.
+  Without strict idempotency, any of the following would cause
+  double-attribution:
+    (a) Keeper restart mid-tick (sees the same on-chain log twice)
+    (b) RPC eth_getLogs returns the same log on overlapping windows
+    (c) Concurrent keeper instances (HA failover) racing on the same log
+
+  This assertion is the wire-level proof of QA-Pro Sprint 12 P0 #1.
+  The remediation in Sprint 12 fixed the row-level UNIQUE constraint;
+  this assertion locks the SLA in spec form so future refactors cannot
+  silently regress.
+
+setup:
+  - description: register an agent and trigger a successful x402 invoke
+    request:
+      method: POST
+      path:   /v1/invoke
+      headers:
+        Content-Type: application/json
+        X-Agent-ID:   "${agent_id}"
+        X-API-Key:    "${api_key}"
+        X-Payment:    "${fixtures.x402.valid_payment_b64}"
+      body: |
+        { "jecp": "1.0", "id": "conformance-x402-idem-${TS}",
+          "capability": "jecp-test/x402-echo", "action": "echo",
+          "input": { "msg": "idempotency" } }
+    expected:
+      status: 200
+    extract:
+      tx_hash:    "$.billing.x402.settlement_tx"
+      log_index:  "$.billing.x402.log_index"
+      chain_id:   "$.billing.x402.chain_id"
+
+  - description: read initial settlement row from DB
+    request:
+      method: GET
+      path:   /admin/db/x402_settlements
+      query:
+        tx_hash: "${tx_hash}"
+        log_index: "${log_index}"
+      headers:
+        X-Admin-Token: "${fixtures.admin.token}"
+    extract:
+      initial_id:     "$.id"
+      initial_amount: "$.amount"
+
+test_procedure:
+  - step: 1
+    action: "Force the keeper to re-process the same on-chain log (harness control plane → /admin/keeper/replay-log)"
+  - step: 2
+    action: "Verify the keeper observes the duplicate, logs at level=info NOT error, and exits the iteration without on-chain tx"
+  - step: 3
+    action: "Verify x402_settlements still has exactly one row for (chain_id, tx_hash, log_index)"
+  - step: 4
+    action: "Verify accountedBalance on Splitter unchanged (eth_call AUTHORIZED_SETTLER view)"
+
+request:
+  description: replay the same on-chain log → keeper MUST no-op idempotently
+  method: POST
+  path:   /admin/keeper/replay-log
+  headers:
+    X-Admin-Token: "${fixtures.admin.token}"
+    Content-Type:  application/json
+  body: |
+    { "chain_id": ${chain_id}, "tx_hash": "${tx_hash}", "log_index": ${log_index} }
+
+expected_outcome:
+  status: 200
+  body_jsonpath:
+    - { path: "$.result",                  equals: "duplicate_ignored" }
+    - { path: "$.db_unique_violation",     equals: true }
+    - { path: "$.onchain_tx_submitted",    equals: false }
+    - { path: "$.row_count_for_key",       equals: 1 }
+
+failure_mode:
+  - "Duplicate insert succeeds ⇒ Provider double-paid → fund-loss"
+  - "Keeper retries on-chain recordSettlement ⇒ second tx may revert (UnauthorizedSettler or recordSettlement-not-idempotent at Splitter level) but wastes gas + obscures audit log"
+  - "row_count > 1 for (chain_id, tx_hash, log_index) ⇒ UNIQUE constraint missing or DROP'd in a migration regression — Sprint 12 P0 #1 regressed"
+  - "onchain_tx_submitted == true ⇒ keeper bypasses DB check (race condition); revisit ordering: SQL insert BEFORE eth_sendRawTransaction is REQUIRED"
+
+postconditions:
+  - "x402_settlements UNIQUE (chain_id, tx_hash, log_index) constraint exists and is enforced (verify via pg_constraint catalog)"
+  - "Keeper service emits structured log event x402.keeper.duplicate_ignored with full key triple"
+  - "Hub metrics counter `x402_keeper_duplicate_ignored_total` increments by 1"
+
+introduced_in: v1.1.0-rc3
+references:
+  - https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper
+  - "Sprint 12 QA P0 audit: project_jecp_qa_audit_p0_fixed.md"

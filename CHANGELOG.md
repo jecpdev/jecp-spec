@@ -6,6 +6,61 @@ The repository follows [SemVer](https://semver.org). Major versions break wire c
 
 ---
 
+## v1.1.0-rc3 — 2026-05-16 — AUTHORIZED_SETTLER redefinition (supersedes rc2)
+
+**Retracted**: `jecp-spec@v1.1.0-rc2` (2026-05-13). Tag deleted, GitHub Release marked SUPERSEDED. See `RETRACT-v1.1.0-rc2.md` for the full operator procedure.
+
+**Reason**: External review on 2026-05-16 identified that rc2's normative definition of `AUTHORIZED_SETTLER` — as "the x402 facilitator's settlement contract address (or, if the facilitator uses an EOA, that EOA)" — was non-implementable against x402.org as deployed and inverted x402's published trust model. x402.org operates a multi-operator facilitator fleet (Canza, Coinbase, Daydreams, X402rs observed on BaseScan as `x402 Facilitator N`), not a single contract; the x402 specification's `/verify` + `/settle` API surface does not include a facilitator-initiated post-pull contract call; the x402 README design principles explicitly forbid the facilitator from moving funds outside client intentions.
+
+**Resolution**: Option (b) Pull-to-treasury + Hub keeper `recordSettlement` design adopted (admiral approval 2026-05-16). The Splitter contract source is **unchanged**; only the constructor argument for the `AUTHORIZED_SETTLER` immutable slot is redefined from "facilitator address" to "Hub-controlled keeper EOA". The Hub `services/x402_keeper.rs` module is newly broken out from the v1.1.1 reconciler watcher and actively calls `recordSettlement` from the keeper EOA after the facilitator's settle leg confirms on-chain. SDK and CLI wire format are unchanged.
+
+### Normative changes (versus rc2)
+
+- **ADR-0003 Am-7** (new amendment) — `AUTHORIZED_SETTLER` redefinition; rotation via Splitter v2 ceremony (no setter on v1); decommissioning policy; AV-1..4 disposition. Supersedes the v1.1.1 deferred OQ on settler address resolution.
+- **`spec/06-x402-integration.md` §6.1, §7.3, §11** — errata applied per `spec/v1.1.0-rc3-errata.md`:
+  - §6.1: `AUTHORIZED_SETTLER` redefined as Hub-controlled keeper EOA, immutable on Splitter v1; separation-of-duties enforced at key generation.
+  - §7.3: settlement timeline corrected from "single-block atomic" (unqualified) to "≤ 2-block on-chain settlement (typical ~3 s, single-block when block timing aligns)". Marketing-grade "single-block atomic" preserved only as observed-measurement claim, never as guaranteed invariant. New invariant I-6 (settlement timing).
+  - §11: reconciler reclassified watcher → keeper-driver (separate module). New invariant I-7 (amount attribution): on-chain `recordSettlement` amount MUST match USDC `Transfer` log from pull leg; keeper-driver MUST refuse retry on mismatch.
+
+### Conformance
+
+Adds 5 new YAML assertions, raising the v1.1.0-rc3 x402 suite to **27**:
+
+- `X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH.yaml`
+- `X402_FACILITATOR_NOT_TRUSTED_AS_SETTLER.yaml`
+- `X402_RECORD_SETTLEMENT_IDEMPOTENT.yaml`
+- `X402_RECORD_SETTLEMENT_LATENCY_BOUND.yaml` (p99 < 30 s)
+- `X402_AMOUNT_ATTRIBUTION_INVARIANT.yaml` (I-7)
+
+Hubs that do not advertise x402 remain exempt from all 27 x402-prefixed assertions.
+
+### Wire compatibility
+
+**Zero wire changes** versus rc2. All of the following remain bit-identical: 402 challenge envelope, `payment.accepts[]` shape, `X-Payment` / `X-Payment-Response` headers, `agent-guide.json` `payment.x402` block, error catalog. See `JobDoneBot/docs/jecp/x402-design/rc3/wire-invariance-checklist.md` for mechanical verification commands.
+
+### SDK / CLI status
+
+- `@jecpdev/sdk@0.8.x` — **conformant with rc3 unchanged**. No deprecation. No release required.
+- `@jecpdev/cli@0.7.x` — **conformant with rc3 unchanged**. No deprecation. No release required.
+- Provider EIP-712 registration flow — unchanged.
+
+### Splitter contract
+
+- `jecp-contracts` Splitter source — unchanged (no Solidity edit required). R-2 verified via `JecpSplitter.sol` L61 immutable declaration.
+- Constructor argument layout — `authorizedSettler` now bound to Hub-controlled keeper EOA at deploy time, not facilitator address.
+- Foundry tests (52 cases) — unchanged.
+
+### Tag plan
+
+```bash
+git -C jecp-spec tag jecp-spec/v1.1.0-rc3
+git -C jecp-spec push origin jecp-spec/v1.1.0-rc3
+```
+
+Promotion to `jecp-spec/v1.1.0` GA follows: Hub deploys Splitter v1 to Base Sepolia with new `AUTHORIZED_SETTLER` = keeper EOA → 27/27 conformance assertions pass on Sepolia → audit firm sign-off on rc3 constructor change (BS-4 3-scope split) → Base mainnet deploy → GA tag.
+
+---
+
 ## v1.1.0 — 2026-05-11 — x402 Integration
 
 Backward-compatible minor release. Adds Coinbase's [x402](https://x402.org) (HTTP 402 + USDC-on-Base micropayment) as a **second, parallel payment path** on `POST /v1/invoke`. The existing pre-funded Stripe wallet path is unchanged. v1.1.0 conformance does NOT require x402 support — Hubs that omit the x402 facilitator config remain conformant with the existing v1.0.x suite plus the `payment_methods`-honors-default invariant.

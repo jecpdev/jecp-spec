@@ -1,0 +1,93 @@
+id: X402_FACILITATOR_NOT_TRUSTED_AS_SETTLER
+level: MUST
+assertion_id: X402_FACILITATOR_NOT_TRUSTED_AS_SETTLER
+category: security
+applies_to: [splitter]
+spec_section: "06-x402-integration §6.1 + §7.2 (rc3 errata: Coinbase facilitator MUST NOT be AUTHORIZED_SETTLER)"
+threat_id: "Panel 2 §3.1 TM-T1 (settler trust boundary); rc3 redesign 2026-05-16 — x402 README principle: 'facilitator must not move funds outside client intentions'"
+severity: critical
+target: splitter
+priority: must
+evidence_url: "https://github.com/x402-foundation/x402/blob/main/README.md#design-principles"
+description: >
+  The JecpSplitter contract MUST reject recordSettlement() calls
+  originating from any Coinbase x402.org facilitator EOA. This is the
+  negative-case complement of X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH:
+  even if an attacker were to compromise or impersonate a facilitator
+  EOA (which Coinbase publicly labels on BaseScan as "x402 Facilitator
+  1..8"), the call to recordSettlement MUST revert with
+  UnauthorizedSettler.
+
+  Background (rc3 redesign, 2026-05-16): the original rc2 design
+  hardcoded a single facilitator EOA as AUTHORIZED_SETTLER. External
+  review identified two flaws:
+    (1) The Coinbase facilitator is a fleet of 8+ EOAs, not a single
+        address — a single immutable hardcode is operationally wrong.
+    (2) The official x402 README states: "facilitator must not move
+        funds outside client intentions" — making facilitator the
+        on-chain trust root inverts the x402 design philosophy.
+
+  rc3 resolution: the Hub operates its own keeper EOA. The facilitator
+  performs USDC pull (via EIP-3009 transferWithAuthorization) only; the
+  Hub keeper observes the on-chain settlement and calls
+  recordSettlement separately. This assertion ensures the negative case
+  is enforced.
+
+setup:
+  - description: read Splitter address from agent-guide
+    request:
+      method: GET
+      path:   /.well-known/agent-guide.json
+    extract:
+      splitter_address: "$.x402.splitter_contract"
+
+  - description: fund a test EOA whose address is in the Coinbase facilitator allowlist fixture
+    note: |
+      harness control plane → /admin/test-eoa/load
+        fixture: "x402_coinbase_facilitator_eoa_1"
+      provides a privkey to a test EOA whose 0x… matches BaseScan label
+      "x402 Facilitator 1". On Base Sepolia this is a synthesized fixture; on
+      mainnet, run as forked-chain test only — NEVER attempt real-mainnet
+      tx from this fixture.
+
+test_procedure:
+  - step: 1
+    action: "Construct a recordSettlement(bytes32 capabilityId, uint256 amount) tx, signed by the Coinbase-facilitator-impersonation EOA"
+  - step: 2
+    action: "Submit tx to Base Sepolia via eth_sendRawTransaction (or harness ForkedAnvil for mainnet replay-safe)"
+  - step: 3
+    action: "Verify tx reverts with UnauthorizedSettler() (selector 0x82b42900) and no state mutation occurred"
+
+request:
+  description: facilitator-EOA-signed recordSettlement MUST revert
+  method: ETH_SEND_RAW_TRANSACTION
+  to: "${splitter_address}"
+  signer: "${fixtures.x402.coinbase_facilitator_eoa_1.privkey}"
+  data: |
+    recordSettlement(
+      capabilityId: "${fixtures.x402.cap_id}",
+      amount: 1000000  # 1 USDC
+    )
+
+expected_outcome:
+  receipt_status: 0
+  revert_reason: "UnauthorizedSettler()"
+  revert_selector: "0x82b42900"
+  body_jsonpath:
+    - { path: "$.accountedBalance_delta", equals: 0 }
+
+failure_mode:
+  - "tx succeeds (status=1) ⇒ Splitter trusts facilitator — rc3 design intent violated, mainnet deploy BLOCKED"
+  - "accountedBalance increases ⇒ a compromised facilitator can drain via splitFor"
+  - "revert with different selector ⇒ access control bypass possible, deeper audit required"
+
+postconditions:
+  - "Audit-A-protocol assertion that the only trusted recordSettlement caller is the Hub keeper EOA (X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH must also pass)"
+  - "Repeat this assertion against each EOA in fixtures.x402.coinbase_facilitator_fleet (all 8+ known fleet members must revert)"
+
+introduced_in: v1.1.0-rc3
+references:
+  - https://github.com/x402-foundation/x402/blob/main/README.md
+  - https://basescan.org/address/0x  # 8 facilitator EOAs labeled on BaseScan
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler
+  - "x402-handoff.md §CRITICAL FINDING (2026-05-16)"

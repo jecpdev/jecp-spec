@@ -1,0 +1,87 @@
+id: X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH
+level: MUST
+assertion_id: X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH
+category: security
+applies_to: [hub, splitter]
+spec_section: "06-x402-integration §6.1 + §7.2 (rc3 errata: AUTHORIZED_SETTLER is Hub keeper EOA, not x402.org facilitator)"
+threat_id: "Panel 2 §3.1 TM-T1 (settler trust boundary); rc3 redesign finding 2026-05-16 (facilitator fleet ≠ single EOA)"
+severity: critical
+target: hub
+priority: must
+evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler"
+description: >
+  Per the rc3 errata (2026-05-16), AUTHORIZED_SETTLER on the deployed
+  JecpSplitter contract MUST equal the Hub keeper EOA whose private key
+  the Hub keeper service holds (KMS-backed in production; deterministic
+  EOA in tests). It MUST NOT equal a Coinbase facilitator EOA, a
+  facilitator fleet member, a relayer key, or any address the Hub does
+  not directly control.
+
+  This assertion proves the on-chain trust root matches the off-chain
+  service identity. A mismatch means either (a) the Splitter was
+  deployed with the wrong constructor arg, or (b) the keeper service is
+  attempting to recordSettlement from an EOA that the Splitter will
+  reject — either way, settlement is broken and Provider payouts are
+  blocked.
+
+setup:
+  - description: read Splitter address from agent-guide
+    request:
+      method: GET
+      path:   /.well-known/agent-guide.json
+    extract:
+      splitter_address: "$.x402.splitter_contract"
+
+  - description: read the Hub keeper EOA from Hub status endpoint
+    request:
+      method: GET
+      path:   /v1/status/x402
+      headers:
+        X-Admin-Token: "${fixtures.admin.token}"
+    extract:
+      hub_keeper_eoa: "$.keeper.authorized_settler_eoa"
+
+  - description: read AUTHORIZED_SETTLER from the deployed Splitter via Base RPC eth_call
+    note: |
+      harness control plane → /admin/eth-call
+        to:   ${splitter_address}
+        data: 0x<selector for AUTHORIZED_SETTLER()>
+      returns 32-byte address (left-padded). Strip to 20 bytes hex.
+    extract:
+      onchain_authorized_settler: "$.result.address_20"
+
+test_procedure:
+  - step: 1
+    action: "Compare onchain_authorized_settler against hub_keeper_eoa (case-insensitive hex)"
+  - step: 2
+    action: "Verify hub_keeper_eoa is NOT one of the known x402.org facilitator fleet EOAs (BaseScan labels 'x402 Facilitator 1..8')"
+  - step: 3
+    action: "Verify recordSettlement from hub_keeper_eoa succeeds in a smoke test"
+
+request:
+  description: assert the keeper EOA matches the Splitter's immutable AUTHORIZED_SETTLER
+  method: ASSERT
+  body: |
+    onchain_authorized_settler.lower() == hub_keeper_eoa.lower()
+    AND hub_keeper_eoa NOT IN fixtures.x402.coinbase_facilitator_fleet
+
+expected_outcome:
+  body_jsonpath:
+    - { path: "$.match",                   equals: true }
+    - { path: "$.onchain_authorized_settler", matches: "^0x[a-fA-F0-9]{40}$" }
+    - { path: "$.hub_keeper_eoa",           matches: "^0x[a-fA-F0-9]{40}$" }
+
+failure_mode:
+  - "Mismatch ⇒ Hub keeper service cannot call recordSettlement (Splitter reverts UnauthorizedSettler)"
+  - "Mismatch ⇒ Provider payouts are permanently blocked until Splitter redeploy"
+  - "Hub keeper EOA == Coinbase facilitator EOA ⇒ Hub no longer controls settlement (rc3 redesign anti-pattern)"
+
+postconditions:
+  - "On Base mainnet: AUTHORIZED_SETTLER must be a 2-of-3 Gnosis Safe-administered EOA (B-6 multisig setup); the keeper service holds an operational signer key only"
+  - "Operator runbook documents the keeper EOA rotation procedure (Splitter is immutable so rotation requires redeploy + provider remigration)"
+
+introduced_in: v1.1.0-rc3
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/06-x402-integration.md
+  - "x402-handoff.md §CRITICAL FINDING (2026-05-16): facilitator fleet ≠ single EOA"

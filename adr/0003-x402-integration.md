@@ -163,3 +163,87 @@ The original draft of the Splitter contract gave a single immutable `REGISTRAR` 
 - [`alloy-signer-aws`](https://docs.rs/alloy-signer-aws) — Rust AWS KMS Ethereum signer used by the RELAYER per Am-5
 - Capital One 2019 SSRF post-mortem (canonical reference for `TM-X1` defense)
 - Stripe / Coinbase / Cloudflare custody patterns (cross-reference for B-2 alternative)
+
+---
+
+## Am-7: AUTHORIZED_SETTLER is a Hub-controlled keeper EOA, immutable in Splitter v1 (2026-05-16)
+
+### Decision
+
+`JecpSplitter.AUTHORIZED_SETTLER` is redefined from "the x402 facilitator's settlement contract address (or EOA)" to a **Hub-controlled keeper EOA** whose private key is held exclusively in AWS KMS, immutable on the v1 Splitter (constructor-set, no setter, no proxy — verified on-chain: `JecpSplitter.sol` line 61 declares `address public immutable AUTHORIZED_SETTLER`). The on-chain settlement flow becomes a deterministic two-step **pull-to-treasury** sequence: (1) the x402 facilitator pulls USDC into the Splitter via EIP-3009 `transferWithAuthorization` per the unchanged x402 wire protocol, then (2) the Hub `services/x402_keeper.rs` driver (newly broken out from the v1.1.1 reconciler watcher) actively calls `recordSettlement(capabilityId, amount)` from the keeper EOA, after which `splitFor(capabilityId, payer)` distributes 85/10/5. Key rotation is emergency-only and executed as a **Splitter v2 deploy + capability re-registration ceremony**, not as a key swap on v1.
+
+### Rationale
+
+Am-7 supersedes the OQ deferred at the end of v1.1.1 ("AUTHORIZED_SETTLER must be set to x402.org's actual settlement contract address on Base"). External review on 2026-05-16 surfaced three defects in that premise:
+
+1. **x402.org operates a multi-operator facilitator fleet, not a single contract.** BaseScan labels show facilitator EOAs run by multiple operators — observed: Canza, Coinbase, Daydreams, X402rs — under the shared label pattern `x402 Facilitator N`. Coinbase-operated EOAs use non-consecutive numbering (e.g., 3, 4, 7), confirming the fleet is multi-organization and dynamic. A single immutable hardcode is structurally incompatible with the deployed reality.
+2. **x402's published design principle forbids facilitator-initiated post-pull contract calls.** The x402 README states the facilitator "must not move funds outside client intentions"; the `/verify` + `/settle` API surface confirms this — there is no facilitator hook for post-pull `recordSettlement`. Any v1.1 design that relies on the facilitator to call into the Splitter is non-implementable against x402.org as it exists.
+3. **The "Hub holds no key on the request hot path" thesis remains intact under Am-7.** `recordSettlement` is off the synchronous `POST /v1/invoke` path; the keeper driver fires in a bounded background loop after the facilitator's settle leg confirms on-chain. The hot path still ends at the agent's `X-Payment` retry → facilitator `/settle` → 200 with `X-Payment-Response`. The keeper EOA signs only the bookkeeping ledger update, never a fund-movement authorization (CEI in `splitFor` guarantees `accountedBalance` is the only fund-routing input).
+
+Three alternatives were considered and rejected:
+
+- **(i-rejected) `AUTHORIZED_SETTLER` as a setter-mutable address on v1.** Mutability concentrates upgrade authority in whoever holds the rotator key, expanding the audit surface (re-entrancy in the setter, ACL on the setter, event integrity on rotation) without materially improving rotation hygiene — AWS KMS asymmetric-key auto-rotation generates a new public key, which under EVM semantics is a new address; rotation is therefore a migration, not a swap, regardless of whether the slot is mutable. Mutability buys nothing and costs audit hours.
+- **(ii-rejected) Proxy pattern (UUPS / Transparent).** Over-engineering for v1.1 scope; introduces a delegate-call surface to audit and a new contract to deploy. Deferred to v1.2 as the upgrade-path option if rotation cadence in production exceeds once per 18 months.
+- **(iii-rejected) Allowlist set of settler addresses.** Equivalent to (i) with a larger surface; same conclusion.
+
+The chosen design (immutable v1 + emergency v2 deploy) follows the well-established blockchain pattern for identity-bound keys: rotation by redeploy + migration ceremony, since on-chain address identity precludes silent key swap. The audit surface remains bounded to constructor-set immutables already in scope, and the Provider-signed EIP-712 registration model (Am-1) is preserved intact across rotations.
+
+### On-chain defense-in-depth (verified against `jecp-contracts/src/JecpSplitter.sol`)
+
+The "immutable + emergency ceremony" model does not stand alone; it is layered with on-chain caps and CEI ordering:
+
+- **`PER_TX_CAP` on `recordSettlement`** (L293): every keeper call MUST satisfy `amount <= PER_TX_CAP` or revert `AmountExceedsCap`. Bounds the blast radius of a compromised keeper key to one cap per transaction. Combined with Hub-side per-day call cap and feature_flag soft-kill (`x402_keeper_enabled = false`, ≤60 s effect), the on-chain primitive provides a hard ceiling no off-chain control can override.
+- **`accountedBalance`-only distribution** (L309): `splitFor` distributes only what the keeper has declared via `recordSettlement`, never the raw contract balance. Direct USDC transfers to the Splitter address (dust / griefing) accumulate as unattributed contract balance — annoying for the reconciler (raises `X402_RECONCILER_MISMATCH_FLAGGED`) but **not exploitable** for value theft. AV-1 (dust attack) is mitigated by this invariant.
+- **CEI in `splitFor`** (L313): `accountedBalance[capabilityId] = 0` is set before any external transfer, eliminating reentrancy as a path to double-spend. AV-3 (reaper griefing) becomes a non-attack — anyone may pay gas to call `splitFor`, but the outcome is deterministic.
+- **Provider escrow on push failure** (L328-333): a USDC-blacklisted or reverting Provider does not block treasury / reserve transfers; the Provider share is escrowed and the Provider can pull via `withdraw()` once unblocked.
+
+These on-chain primitives are the audit firm's anchor: Am-7 changes the *meaning* of `AUTHORIZED_SETTLER` and the *off-chain caller* of `recordSettlement`, but every on-chain invariant the v1.1.1 Splitter design already enforced remains enforced. No Solidity edit is required for rc3.
+
+### Rotation procedure (emergency only, SLA < 72 h)
+
+Triggered if and only if the keeper EOA's KMS key is suspected compromised or its CloudTrail audit chain is broken. Routine cadence is **never**.
+
+1. **T+0h — Detect & freeze.** Operator flips `feature_flags.x402_enabled = false` (existing kill switch, ≤60 s effect). All new x402 invokes return `X402_NOT_ACCEPTED` subcause `x402_disabled`. In-flight settlements (already `/settle`'d at facilitator, awaiting `recordSettlement`) are flagged in the keeper-driver and held; Hub absorbs any Provider payout delay under the existing 24 h refund SLA.
+2. **T+4h — Deploy Splitter v2.** Compile and deploy `JecpSplitter` with new `AUTHORIZED_SETTLER` = new keeper EOA (new KMS asymmetric key, fresh public key derived). All other immutables (`HUB_TREASURY`, `NETWORK_RESERVE`, `PER_TX_CAP`, EIP-712 domain separator with `chainId` and new `verifyingContract`) re-set. Verify on BaseScan.
+3. **T+8h — Capability migration ceremony.** For every active capability `c` registered on Splitter v1, the Provider re-signs the EIP-712 `register()` payload against Splitter v2's domain separator. Hub coordinates via a one-shot migration endpoint (`POST /v1/manifests/{id}/migrate-splitter`); Providers who do not sign within T+48 h are marked `inactive` and their capabilities return 404 until re-registered. The migration list is published as a JSON file at `https://jecp.dev/.well-known/jecp-splitter-migration-v1-to-v2.json` (immutable, content-addressed by Splitter v2 address).
+4. **T+24h — Update Hub config.** Hub `JECP_SPLITTER_ADDRESS` env var points at Splitter v2; `JECP_HUB_KEEPER_KMS_KEY_ID` points at the new KMS key. Rolling deploy across Fly.io regions; keeper driver picks up the new address on next health-check tick.
+5. **T+48h — Drain Splitter v1.** Hub treasury multisig coordinates with each capability owner to call `splitFor` for any residual `accountedBalance`; remaining unattributed contract balance (if any) is acknowledged as locked-by-design (no admin sweep exists on v1 — this is intentional and documented).
+6. **T+72h — Flip kill switch back.** `feature_flags.x402_enabled = true`. Post-mortem published within 7 days at `https://jecp.dev/security/incidents/`.
+
+The ceremony is **disruptive by design**: rotation friction forces public accountability and aligns operator incentives with key-hygiene best practices for on-chain identity-bound keys.
+
+### Decommissioning policy
+
+Splitter v1 is **never deleted**, only decommissioned. Post-migration, v1 retains immutable history of all `recordSettlement` and `splitFor` events for audit and forensic analysis. The Hub MAY mark v1 as `decommissioned` in its public capability registry; clients MUST treat any `pay_to = Splitter_v1_address` in a 402 challenge as a Hub bug (return `X402_NOT_ACCEPTED` subcause `network_unsupported` if encountered post-migration). BaseScan verification metadata, Foundry source, and audit reports for v1 remain published in perpetuity at `github.com/jecpdev/jecp-contracts` under the `v1.1.x` tag.
+
+### AV disposition (post-Outside-Observer verification)
+
+Outside Observer review (2026-05-16) raised 4 attack vectors against the (b) design. Disposition:
+
+- **AV-1 (Splitter dust attack)**: ✅ mitigated by `accountedBalance`-only distribution (L309). Unattributed dust is locked, not exploitable. Reconciler raises informational mismatch.
+- **AV-2 (Base reorg double-record)**: ✅ mitigated by keeper-driver waiting ≥1 confirmation before calling `recordSettlement`; the on-chain `usedNonces` (Am-2) guarantees idempotency even on reorg replay. Conformance YAML `X402_RECORD_SETTLEMENT_IDEMPOTENT` enforces.
+- **AV-3 (splitFor reaper griefing)**: ✅ no-op attack. CEI ordering + deterministic distribution make front-running outcome-equivalent to admin-run. Gas cost falls on attacker.
+- **AV-4 (keeper key compromise → unlimited recordSettlement)**: ✅ bounded by `PER_TX_CAP` (L293) + Hub-side per-day call cap + feature_flag soft-kill + KMS audit-trail via CloudTrail. Worst case: 1 × `PER_TX_CAP` × (calls-before-detection). Detection target: ≤5 min via Better Stack alarm on call-rate anomaly. Rotation per this Am-7 procedure.
+
+### Consequences
+
+**Positive**
+
+- **Implementation aligns with x402.org's deployed multi-operator facilitator fleet.** No dependency on a non-existent single facilitator contract address; the Hub keeper drives `recordSettlement` regardless of which facilitator EOA performed the pull.
+- **Audit surface bounded to constructor-set immutables already in v1.1.1 scope.** Splitter v1 has no rotator function, no allowlist mapping, no upgrade slot — the audit (Spearbit / Cure53 / Trail of Bits per BS-4 3-scope split) covers the same primitives already in scope for v1.1.1 plus one renamed role.
+- **Rotation discipline is enforced by ceremony cost.** Operator cannot quietly swap keys; every rotation is a public, content-addressed event with Provider sign-off.
+
+**Negative**
+
+- **Rotation requires Provider coordination.** Capability re-signing is a 24–48 h Provider-side operation. Providers offline during the ceremony experience capability downtime. Mitigation: the `feature_flags.x402_enabled` kill switch holds the system in a degraded-but-safe state with Stripe wallet path unaffected; existing 24 h refund SLA covers in-flight settlements.
+- **Splitter v2 deploy is a non-trivial operation under time pressure.** Foundry build + Base mainnet deploy + BaseScan verify + Hub config rollout + Provider coordination is realistically 48–72 h of operator wall-clock, not minutes. The 72 h SLA is the worst-case bound, not the target. v1.2 MAY introduce a proxy pattern to reduce ceremony cost if rotation frequency observed in v1.1 production exceeds once per 18 months.
+
+### References
+
+- **Am-7** (this amendment) — supersedes the v1.1.1 OQ on `AUTHORIZED_SETTLER` address resolution.
+- **Am-1** — Provider EIP-712 registration; unaffected by Am-7 (Provider signatures bind to the Splitter's `verifyingContract`, which is re-derived per Splitter version).
+- **Am-2** — `recordSettlement` + `accountedBalance` ledger; semantics unchanged, caller redefined from "facilitator settlement helper" to "Hub keeper EOA driver".
+- **x402 specification v1** (https://x402.org) — `/verify` + `/settle` API surface; confirmation that no post-pull contract call hook exists in the facilitator.
+- **x402 README design principles** (https://github.com/coinbase/x402/blob/main/README.md) — "facilitator must not move funds outside client intentions"; the principle Am-7 honors.
+- **BaseScan facilitator fleet observation** (2026-05-16) — multiple operators (Canza, Coinbase, Daydreams, X402rs) labelled as `x402 Facilitator N`; basis for rejecting the single-address premise.
+- **`jecp-contracts/src/JecpSplitter.sol`** — line 61 verified immutable; line 293 PER_TX_CAP enforcement; line 309 accountedBalance-only distribution. R-2/R-3 verified.

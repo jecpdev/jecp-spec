@@ -1,0 +1,100 @@
+id: X402_AMOUNT_ATTRIBUTION_INVARIANT
+level: MUST
+assertion_id: X402_AMOUNT_ATTRIBUTION_INVARIANT
+category: correctness
+applies_to: [hub, splitter]
+spec_section: "06-x402-integration §6.4 (Reconciler invariant I-7); ADR-0003 Am-7 (rc3 errata)"
+threat_id: "Panel 2 §3.4 TM-X4 (reorg); Panel 4 §2.2 (fund-attribution drift); rc3 invariant I-7 new"
+severity: critical
+target: hub
+priority: must
+evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#64-invariants"
+description: >
+  For every capability_id observed in the system, the following
+  invariant MUST hold at all times outside the open reconciler-tick
+  window:
+
+    Σ recordSettlement(capability_id, amount).amount
+      ==
+    Σ Splitter on-chain USDC inflow attributed to capability_id
+
+  In English: the sum of amounts the Hub keeper has reported to the
+  Splitter for a given capability MUST equal the sum of USDC that
+  actually arrived at the Splitter address tagged with that capability,
+  as observed on-chain via Base RPC eth_getLogs against the USDC
+  Transfer event.
+
+  This is invariant I-7 — newly introduced in the rc3 redesign because
+  the rc2 design assumed facilitator-driven recordSettlement, where
+  recordSettlement and USDC pull were atomic in a single tx. Under rc3
+  (Hub-driven), the two events are separated in time AND signed by
+  different parties (facilitator pulls USDC; Hub keeper records). Any
+  drift is a Critical operational incident.
+
+  Drift sources to detect:
+    (a) Hub keeper records an amount that no USDC pull backs
+        (over-attribution → drains Splitter on splitFor)
+    (b) Facilitator pulls USDC but Hub keeper never records
+        (under-attribution → orphan USDC, Provider not paid)
+    (c) Reorg deletes a USDC Transfer log; Hub keeper still has
+        recordSettlement entry (post-reorg over-attribution)
+
+setup:
+  - description: register agent + run a synthetic mixed workload
+    note: |
+      harness load-gen → /admin/loadgen/x402-mixed
+        capability_count: 5
+        invokes_per_capability: 20
+        total: 100 settlements across 5 capabilities
+      Provides cross-capability variation for the per-id sum check.
+
+  - description: wait for keeper to drain queue + reconciler to tick twice
+    note: harness sleep 180s  # 60s tick × 3 cycles for safety
+
+test_procedure:
+  - step: 1
+    action: "For each of the 5 capability_ids: query Hub DB SELECT SUM(amount) FROM x402_settlements WHERE capability_id = $1 GROUP BY capability_id → keeper_sum[id]"
+  - step: 2
+    action: "For each of the 5 capability_ids: read accountedBalance[id] via eth_call on Splitter (this is the on-chain mirror of step 1's sum since rc3 ledger semantics)"
+  - step: 3
+    action: "For each of the 5 capability_ids: query Base RPC eth_getLogs for USDC Transfer events to Splitter address, filter by tx-hash matching x402_settlements rows for this capability → onchain_sum[id]"
+  - step: 4
+    action: "Assert keeper_sum[id] == accountedBalance[id] == onchain_sum[id] for every id"
+  - step: 5
+    action: "Assert the reconciler's reported drift counter (`x402_reconciler_attribution_drift_total`) is 0"
+
+request:
+  description: cross-source attribution invariant check via reconciler admin endpoint
+  method: GET
+  path:   /admin/reconciler/attribution-audit
+  query:
+    chain_id: "${fixtures.x402.chain_id}"
+    window:   "1h"
+  headers:
+    X-Admin-Token: "${fixtures.admin.token}"
+
+expected_outcome:
+  status: 200
+  body_jsonpath:
+    - { path: "$.checked_capabilities",                gte: 5 }
+    - { path: "$.checked_settlements",                 gte: 100 }
+    - { path: "$.drift_count",                         equals: 0 }
+    - { path: "$.max_per_capability_drift_usdc",       equals: "0" }
+    - { path: "$.invariant_i7_holds",                  equals: true }
+
+failure_mode:
+  - "drift_count > 0 ⇒ Critical. Freeze ALL pending splitFor calls. Pause keeper. Activate kill-switch via Splitter pause() (B-6 multisig)."
+  - "keeper_sum > onchain_sum ⇒ over-attribution. Risk: splitFor can drain Splitter funds. Recovery: zero out unbacked accountedBalance entries via multisig governance tx."
+  - "keeper_sum < onchain_sum ⇒ orphan USDC. Recovery: backfill recordSettlement entries by replaying keeper from missed block range; verify against reconciler orphan-detection (X402_RECONCILER_ORPHAN_DETECTED)."
+  - "accountedBalance != keeper_sum ⇒ Splitter ledger is out of sync with Hub DB. This is the worst case — implies recordSettlement tx landed but DB row missing, or vice versa. Manual reconciliation required."
+
+postconditions:
+  - "Reconciler emits invariant_i7_violation event to audit_log with full key triple + delta in USDC"
+  - "Grafana dashboard 'x402-reconciler' shows invariant_i7_holds = true heartbeat"
+  - "Alert fires on first drift_count > 0 transition (PagerDuty P0)"
+
+introduced_in: v1.1.0-rc3
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#64-invariants
+  - "ADR-0003 Am-7 (rc3 errata): Invariant I-7 — cross-source attribution sum"
+  - "Panel 4 §2.2: fund-attribution drift cross-trust-boundary finding"

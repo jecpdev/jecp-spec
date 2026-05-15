@@ -1,0 +1,95 @@
+id: X402_RECORD_SETTLEMENT_LATENCY_BOUND
+level: SHOULD
+assertion_id: X402_RECORD_SETTLEMENT_LATENCY_BOUND
+category: liveness
+applies_to: [hub]
+spec_section: "06-x402-integration §6.3 (Hub keeper latency budget); rc3 errata §6.3.2"
+threat_id: "Panel 2 §3.4 TM-ST1 (settlement timing); rc3 redesign 2026-05-16 (Hub-driven recordSettlement adds Hub-side latency)"
+severity: high
+target: hub
+priority: should
+evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper-latency"
+description: >
+  Under the rc3 design (Hub keeper drives recordSettlement, not the
+  facilitator), the wall-clock interval from "facilitator successfully
+  pulls USDC to the Splitter" to "Hub keeper successfully lands the
+  recordSettlement tx on-chain" MUST have a p99 ≤ 30 seconds measured
+  over a rolling 1-hour window.
+
+  Latency budget derivation (司令塔 BS-3 確定):
+    - Reconciler tick interval:        60 seconds (default)
+    - Retry budget within one tick:    0.5 (one half-tick worst case)
+    - p99 latency bound:               60s × 0.5 = 30 seconds
+
+  Why this matters: every second between facilitator-pull and
+  Hub-recordSettlement is a second where:
+    (a) USDC sits in the Splitter without a payment_id binding it
+        → reconciler may flag it as orphan (X402_RECONCILER_ORPHAN_DETECTED)
+    (b) The Provider has not yet earned credit
+        → cross-trust-boundary delay UX regression
+    (c) An attacker observing the facilitator pull on-chain has a
+        window to attempt a race attack (mitigated by AUTHORIZED_SETTLER
+        gating + UNIQUE constraint, but the window MUST stay tight)
+
+  This is a SHOULD (not MUST) because transient RPC slowness or Base
+  block-time spikes can legitimately push individual samples over 30s;
+  but the p99 over a rolling window MUST hold. A breach is a P1
+  operational incident.
+
+setup:
+  - description: prime the Hub with 100 fresh invokes over 5 minutes (provides statistical population for p99)
+    note: |
+      harness load-gen → /admin/loadgen/x402-burst
+        count: 100
+        interval_ms: 3000
+      Each invoke creates one settlement; harness records timestamp
+      pairs (facilitator_pull_ts, keeper_record_ts) into a metrics
+      sidecar.
+
+  - description: wait for the load-gen to complete + 60s settle
+    note: harness sleep 360s
+
+test_procedure:
+  - step: 1
+    action: "Query Hub metrics endpoint for keeper_record_settlement_latency_seconds histogram"
+  - step: 2
+    action: "Extract the p99 quantile over the last 1h window"
+  - step: 3
+    action: "Verify p99 ≤ 30.0 seconds"
+  - step: 4
+    action: "Verify p50 ≤ 5.0 seconds (sanity check — typical case should be well within budget)"
+  - step: 5
+    action: "Verify max sample (p100) ≤ 90.0 seconds (catches pathological stragglers; > 90s = stuck keeper)"
+
+request:
+  description: query Prometheus-format metrics for keeper latency
+  method: GET
+  path:   /metrics
+  headers:
+    Accept: text/plain
+    X-Admin-Token: "${fixtures.admin.token}"
+
+expected_outcome:
+  status: 200
+  body_metrics:
+    - { name: "keeper_record_settlement_latency_seconds", quantile: "0.99", lte: 30.0 }
+    - { name: "keeper_record_settlement_latency_seconds", quantile: "0.50", lte: 5.0 }
+    - { name: "keeper_record_settlement_latency_seconds_max", lte: 90.0 }
+    - { name: "keeper_record_settlement_landed_total", gte: 95 }  # ≥95% of 100 should land
+
+failure_mode:
+  - "p99 > 30s ⇒ SLA breach. Triage in order: (a) Base RPC latency, (b) keeper service GC pressure, (c) gas-price under-bid causing reorgs"
+  - "p99 > 60s ⇒ reconciler tick is overlapping with itself, fund attribution at risk — keeper service restart + P0 page"
+  - "max > 90s with otherwise-healthy p99 ⇒ specific log_index stuck; investigate single stuck tx"
+  - "landed_total < 95 ⇒ keeper is dropping or losing settlements, not just slow — Critical, fund-attribution-loss path"
+
+postconditions:
+  - "Grafana dashboard 'x402-keeper' visualizes this histogram with the 30s SLA line drawn"
+  - "Better Stack / PagerDuty alert fires on p99 > 30s for 5 consecutive 1m samples"
+  - "Operator runbook docs/jecp/operations/keeper-latency-runbook.md exists with triage flowchart"
+
+introduced_in: v1.1.0-rc3
+references:
+  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper-latency
+  - "司令塔 BS-3 確定: 60s reconciler tick × 0.5 retry budget = 30s p99 bound"
+  - "x402-handoff.md (rc3 redesign §3): Hub keeper drives recordSettlement"
