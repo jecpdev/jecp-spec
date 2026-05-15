@@ -113,6 +113,10 @@ WWW-Authenticate: x402 realm="jecp.dev", network="base", asset="USDC"
 | `WWW-Authenticate` header | SHOULD | Standard HTTP challenge per RFC 7235. Allows non-JSON-aware clients to surface the requirement. |
 | `Cache-Control: no-store` | MUST | Prevents CDN caching of paid challenge responses. |
 
+#### 2.2.1 `amount_usd` semantics on `stripe-wallet` entries
+
+When both `stripe-wallet` and `exact` (x402) entries are emitted for the same action, the `stripe-wallet` entry's `amount_usd` and the `exact` entry's `max_amount_required` (atomic USDC) reference the **same underlying price**. For v1.1.0, USD ≡ USDC at 1:1 — the `amount_usd` value is `max_amount_required ÷ 10^6` exactly, with no Stripe processing-fee uplift. Rationale: the wallet path is pre-funded via Stripe (top-up flows absorb the fee at top-up time), so per-call billing does not re-charge for fees. Hubs MUST serialize `amount_usd` with up to 6 decimal places so sub-cent prices (e.g., `$0.005` = `5000` micro-USDC) round-trip cleanly through JSON; clients MUST NOT cast to integer cents. A future v1.2 MAY introduce per-call fee uplift; if so, the relationship between the two amounts will be redefined under a new field — the v1.1.0 invariant is "same value, different unit."
+
 ### 2.3 `accepts[]` order
 
 When both `stripe-wallet` and `exact` (x402) entries are present, the Hub MUST list `stripe-wallet` first. Rationale: Stripe is more recoverable (chargeback / dispute paths exist). This is a normative requirement to mitigate mode-confusion attacks (Panel 2 TM-MC: agents that misinterpret order may consume the wrong signed authorization). x402-native positioning lives in marketing surfaces, not in protocol field order.

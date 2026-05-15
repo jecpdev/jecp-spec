@@ -12,7 +12,7 @@
       "Content-Type": "application/json",
       "X-Agent-ID": "jdb_ag_x402test_happy_001",
       "X-API-Key":  "jdb_ak_xxxxxxxxxxxxxxxxxxxxx",
-      "X-Payment":  "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHgxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3OCIsImF1dGhvcml6YXRpb24iOnsiZnJvbSI6IjB4QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUExIiwidG8iOiIweFNQTElUVEVSMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTIzNCIsInZhbHVlIjoiMjAwMDAwIiwidmFsaWRBZnRlciI6IjE3NjI2ODk2MDAiLCJ2YWxpZEJlZm9yZSI6IjE3NjI2ODk2NjAiLCJub25jZSI6IjB4ZGVhZGJlZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifX19"
+      "X-Payment":  "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHgxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3OCIsImF1dGhvcml6YXRpb24iOnsiZnJvbSI6IjB4QWFhQWFBQWFhQWFBQWFhQWFBYUFBYWFBYUFhQUFhYUFhQWFBQWFBYSIsInRvIjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBDMERFIiwidmFsdWUiOiIyMDAwMDAiLCJ2YWxpZEFmdGVyIjoiMTc2MjY4OTYwMCIsInZhbGlkQmVmb3JlIjoiMTc2MjY4OTY2MCIsIm5vbmNlIjoiMHhkZWFkYmVlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3In19fQ=="
     },
     "body": {
       "jecp": "1.0",
@@ -30,8 +30,8 @@
     "payload": {
       "signature": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678",
       "authorization": {
-        "from":        "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1",
-        "to":          "0xSPLITTER000000000000000000000000000001234",
+        "from":        "0xAaaAaAAaaAaAAaaAaAaAAaaAaAaAAaaAaAaAAaAa",
+        "to":          "0x000000000000000000000000000000000000C0DE",
         "value":       "200000",
         "validAfter":  "1762689600",
         "validBefore": "1762689660",
@@ -44,7 +44,7 @@
     {
       "endpoint": "/verify",
       "request_body": { "x402Version": 1, "paymentPayload": "<echoes decoded>", "paymentRequirements": "<from challenge>" },
-      "response_body": { "isValid": true, "invalidReason": null, "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1" }
+      "response_body": { "isValid": true, "invalidReason": null, "payer": "0xAaaAaAAaaAaAAaaAaAaAAaaAaAaAAaaAaAaAAaAa" }
     },
     {
       "endpoint": "/settle",
@@ -54,7 +54,7 @@
         "errorReason": null,
         "transaction": "0xc0ffee0000000000000000000000000000000000000000000000000000000001",
         "network": "base",
-        "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1"
+        "payer": "0xAaaAaAAaaAaAAaaAaAaAAaaAaAaAAaaAaAaAAaAa"
       }
     }
   ],
@@ -64,7 +64,7 @@
     "headers": {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
-      "X-Payment-Response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YzBmZmVlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAxIiwibmV0d29yayI6ImJhc2UiLCJwYXllciI6IjB4QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUExIn0=",
+      "X-Payment-Response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YzBmZmVlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsIm5ldHdvcmsiOiJiYXNlIiwicGF5ZXIiOiIweEFhYUFhQUFhYUFhQUFhYUFhQWFBQWFhQWFBYUFBYWFBYUFhQUFhQWEifQ==",
       "Access-Control-Expose-Headers": "X-Payment-Response, X-Request-Id"
     },
     "body": {
@@ -83,7 +83,7 @@
         "x402": {
           "settlement_tx": "0xc0ffee0000000000000000000000000000000000000000000000000000000001",
           "network": "base",
-          "payer": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1",
+          "payer": "0xAaaAaAAaaAaAAaaAaAaAAaaAaAaAAaaAaAaAAaAa",
           "facilitator": "https://x402.org/facilitator"
         }
       },
