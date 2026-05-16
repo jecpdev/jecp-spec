@@ -1,0 +1,73 @@
+id: X402_RECORD_SETTLEMENT_LATENCY_BOUND
+spec_section: spec/06-x402-integration.md §6.3 (Hub keeper service contract)
+amendment: ADR-0003 Am-7 (rc3, 2026-05-16)
+severity: high
+target: hub + prometheus
+category: rc3_liveness
+description: >
+  Hub keeper service MUST record on-chain settlement events within a
+  p99 latency budget of 30 seconds (measured from facilitator-confirmed
+  pull observation to Splitter.recordSettlement() inclusion). Sustained
+  budget breach indicates keeper service degradation requiring incident
+  response per the Hub keeper incident-response playbook (reference Hub
+  ships IR-PLAYBOOK-HUB-KEEPER.md in its release-prep set).
+
+preconditions:
+  - hub running with x402 method enabled for ≥ 1 hour
+  - prometheus scraping hub /metrics endpoint
+  - at least 100 settlement events processed in the measurement window
+  - chain is Base mainnet (8453) or sepolia (84532) — chain selection in
+    fixture, NOT in spec assertion (we measure the keeper, not the chain)
+
+steps:
+  - description: query keeper latency histogram from prometheus
+    action: prometheus_query
+    query: >
+      histogram_quantile(
+        0.99,
+        sum(rate(keeper_record_settlement_latency_seconds_bucket[5m])) by (le)
+      )
+    capture:
+      p99_seconds: $.data.result[0].value[1]
+
+  - description: assert p99 within budget
+    action: assert_less_than_equal
+    left: ${p99_seconds}
+    right: 30.0
+
+  - description: query sample size (avoid alerts on low-volume windows)
+    action: prometheus_query
+    query: >
+      sum(increase(keeper_record_settlement_latency_seconds_count[5m]))
+    capture:
+      samples: $.data.result[0].value[1]
+
+  - description: ensure sample size is meaningful
+    action: assert_greater_than_equal
+    left: ${samples}
+    right: 100
+
+expect:
+  p99_seconds_within_budget: true
+  sample_size_meaningful: true
+
+postconditions:
+  - prometheus metric `x402_latency_check_total{result="pass"}` incremented
+  - if assertion FAILED, prometheus metric `x402_latency_check_total{result="breach"}` incremented and an Alertmanager alert with severity=high MUST fire within 60 seconds
+
+failure_action: >
+  Continuous breach (3 consecutive 5-min windows above budget) triggers
+  the keeper latency-degradation playbook (Hub operator runbook §3).
+  Single-window breach is logged but does not block GA — sustained breach does.
+
+rationale: >
+  The 30s p99 budget is derived from:
+    - Base block time: 2s
+    - MIN_CONFIRMATIONS: 12 → 24s expected
+    - Keeper RPC + signing overhead: ≤ 6s
+  Anything beyond 30s indicates queueing, RPC degradation, or KMS
+  saturation — each of which has a specific runbook entry.
+
+  This assertion runs continuously (not just at GA). It gates the §2
+  Dogfeed phase: 7 consecutive days must all pass this assertion before
+  §3 Audit can launch.

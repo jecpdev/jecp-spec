@@ -1,0 +1,108 @@
+id: X402_AMOUNT_ATTRIBUTION_INVARIANT
+spec_section: spec/06-x402-integration.md §6.4 (Invariant I-7)
+amendment: ADR-0003 Am-7 (rc3, 2026-05-16)
+severity: critical
+target: hub + database + reconciler + chain
+category: rc3_invariant_i7
+description: >
+  Invariant I-7 (amount attribution): For every settlement, the sum of
+  amounts observed across three independent sources MUST agree to the
+  cent. Drift between sources indicates either: (a) bug in keeper
+  accounting, (b) bug in reconciler, (c) silent tampering. Any I-7 drift
+  is a GA-blocker.
+
+  Three sources:
+    A. on-chain Splitter event (USDCPullReceived + SettlementRecorded)
+    B. jecp.x402_settlements row (amount_usdc_micro)
+    C. agent_balances ledger delta (debit_amount in agent_ledger)
+
+preconditions:
+  - hub running with x402 method enabled
+  - reconciler running (scrape interval 60s minimum)
+  - at least 1000 settlements in window [now - 7d, now]
+
+steps:
+  - description: query on-chain side
+    action: chain_query
+    sql: >
+      SELECT
+        log_index,
+        tx_hash,
+        amount AS amount_chain_micro
+      FROM splitter_events
+      WHERE event_name = 'SettlementRecorded'
+        AND block_timestamp >= NOW() - INTERVAL '7 days'
+    capture:
+      chain_rows: $.result
+
+  - description: query DB settlement side
+    action: db_query
+    sql: >
+      SELECT
+        log_index,
+        tx_hash,
+        amount_usdc_micro AS amount_db_micro
+      FROM jecp.x402_settlements
+      WHERE settled_at >= NOW() - INTERVAL '7 days'
+        AND status IN ('chain_confirmed', 'facilitator_attested')
+    capture:
+      db_rows: $.result
+
+  - description: query agent ledger side
+    action: db_query
+    sql: >
+      SELECT
+        s.log_index,
+        s.tx_hash,
+        SUM(l.debit_amount_micro) AS amount_ledger_micro
+      FROM jecp.x402_settlements s
+      JOIN jecp.agent_ledger l ON l.settlement_id = s.id
+      WHERE s.settled_at >= NOW() - INTERVAL '7 days'
+      GROUP BY s.log_index, s.tx_hash
+    capture:
+      ledger_rows: $.result
+
+  - description: full outer join — verify all 3 sources align per (tx_hash, log_index)
+    action: assert_three_way_join
+    keys: [tx_hash, log_index]
+    sources:
+      A: ${chain_rows}    # amount_chain_micro
+      B: ${db_rows}       # amount_db_micro
+      C: ${ledger_rows}   # amount_ledger_micro
+    assertion: "A == B == C for every key"
+
+  - description: query reconciler drift counter
+    action: prometheus_query
+    query: >
+      x402_reconciler_attribution_drift_total
+    capture:
+      drift_count: $.data.result[0].value[1]
+
+  - description: drift counter MUST be zero
+    action: assert_equal
+    left: ${drift_count}
+    right: 0
+
+expect:
+  three_way_join_consistent: true
+  drift_count_zero: true
+
+postconditions:
+  - audit_log has 0 rows with action = "x402.attribution_drift_detected" in last 7d
+  - prometheus metric `x402_invariant_i7_check_total{result="hold"}` incremented
+
+failure_action: >
+  Any drift = GA gate BLOCKED. This is invariant-level — there is no
+  threshold for acceptable drift. Single-row drift triggers full
+  reconciler audit + manual journal review.
+
+rationale: >
+  This is the strongest cross-source check rc3 introduces. By comparing
+  chain + DB + ledger pairwise, it catches:
+    - keeper writes DB but tx never made it on-chain (B≠A)
+    - keeper writes DB but agent_ledger debit missing (B≠C)
+    - on-chain settlement happened but DB never recorded (A≠B,C)
+    - rounding error in micro-USDC accounting (B≠C off-by-1)
+
+  Without I-7, any of these silently corrupts revenue attribution.
+  With I-7 + drift_count_zero, every settlement is provably consistent.

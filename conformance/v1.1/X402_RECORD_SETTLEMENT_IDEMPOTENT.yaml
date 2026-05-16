@@ -1,0 +1,118 @@
+id: X402_RECORD_SETTLEMENT_IDEMPOTENT
+spec_section: spec/06-x402-integration.md §6.4 (Invariant I-7 — idempotency)
+amendment: ADR-0003 Am-7 (rc3, 2026-05-16) — Sprint 12 P0 #1 locked into spec
+severity: critical
+target: hub + database
+category: rc3_idempotency
+description: >
+  Replaying the same on-chain pull event (chain_id, tx_hash, log_index)
+  MUST NOT produce duplicate settlement records, duplicate balance
+  deductions, or duplicate revenue splits. The Hub keeper MUST be
+  idempotent on this triple.
+
+preconditions:
+  - hub running with x402 method enabled
+  - capability "jobdonebot/sandbox/echo" exists with price = $0.001
+  - test agent registered with $5.000 balance
+  - base sepolia (84532) reachable
+  - conformance/v1.1/fixtures/idempotency-pull-event.json defines:
+      chain_id: 84532
+      tx_hash: 0xidempotency_fixture_pull_event_v1
+      log_index: 0
+      payer: <test agent's EOA>
+      amount_usdc_micro: 1000
+
+steps:
+  - description: invoke once — settlement is recorded
+    request:
+      method: POST
+      path: /v1/invoke
+      headers:
+        X-Agent-ID: ${test_agent.agent_id}
+        X-API-Key: ${test_agent.api_key}
+      body:
+        jecp: "1.0"
+        id: "idempotent-test-001"
+        capability: "jobdonebot"
+        action: "sandbox/echo"
+        input: { msg: "first" }
+        method: "x402"
+        x402_pull_fixture: idempotency-pull-event
+    expect:
+      status: 200
+      body:
+        billing:
+          charged: 0.001
+          balance_after: 4.999
+
+  - description: query settlement count
+    action: db_query
+    sql: >
+      SELECT COUNT(*) AS n
+      FROM jecp.x402_settlements
+      WHERE chain_id = 84532
+        AND tx_hash = '0xidempotency_fixture_pull_event_v1'
+        AND log_index = 0
+    expect:
+      n: 1
+
+  - description: replay same pull event — Hub MUST detect and skip
+    request:
+      method: POST
+      path: /v1/invoke
+      headers:
+        X-Agent-ID: ${test_agent.agent_id}
+        X-API-Key: ${test_agent.api_key}
+      body:
+        jecp: "1.0"
+        id: "idempotent-test-002"
+        capability: "jobdonebot"
+        action: "sandbox/echo"
+        input: { msg: "second" }
+        method: "x402"
+        x402_pull_fixture: idempotency-pull-event
+    expect:
+      status: 200
+      body:
+        billing:
+          charged: 0.000     # already attributed, no double-charge
+          replay_detected: true
+          balance_after: 4.999
+
+  - description: query settlement count again — still 1
+    action: db_query
+    sql: >
+      SELECT COUNT(*) AS n
+      FROM jecp.x402_settlements
+      WHERE chain_id = 84532
+        AND tx_hash = '0xidempotency_fixture_pull_event_v1'
+        AND log_index = 0
+    expect:
+      n: 1
+
+expect:
+  no_duplicate_settlement_rows: true
+  no_duplicate_balance_deduction: true
+  replay_handled_as_no_op: true
+
+postconditions:
+  - audit_log has exactly 1 row with action = "x402.settlement_recorded" for this fixture
+  - audit_log has exactly 1 row with action = "x402.replay_skipped" for the second attempt
+  - Prometheus metric `x402_replay_skipped_total` incremented by exactly 1
+
+failure_action: >
+  If ANY of: duplicate row, duplicate balance deduction, or missing
+  replay-skipped audit entry — GA gate BLOCKED. This is the exact failure
+  mode Sprint 12 P0 #1 was created to prevent.
+
+rationale: >
+  Idempotency on (chain_id, tx_hash, log_index) is enforced by:
+    1. UNIQUE constraint on the triple (DB layer)
+    2. ON CONFLICT DO NOTHING in INSERT (Rust layer)
+    3. Replay-detection short-circuit BEFORE balance mutation (Rust layer)
+  Any one of those alone is insufficient. Test exercises all three.
+
+  Schema requirement: jecp.x402_settlements MUST have a UNIQUE constraint
+  on the triple (chain_id, tx_hash, log_index). Reference Hub migration:
+  see `supabase/migrations/` in the reference Hub implementation
+  (jecpdev/jecp-server) tagged with rc3.

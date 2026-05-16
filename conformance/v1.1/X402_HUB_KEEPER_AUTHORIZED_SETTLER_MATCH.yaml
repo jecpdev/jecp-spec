@@ -1,0 +1,60 @@
+id: X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH
+spec_section: spec/06-x402-integration.md §6.1 (AUTHORIZED_SETTLER definition)
+amendment: ADR-0003 Am-7 (rc3, 2026-05-16)
+severity: critical
+target: hub
+category: rc3_trust_root_positive
+description: >
+  Under rc3, AUTHORIZED_SETTLER on JecpSplitter MUST equal the Hub-operated
+  keeper EOA derived from the AWS KMS signing key. This assertion verifies
+  the on-chain immutable AUTHORIZED_SETTLER address (from Splitter
+  constructor) matches the EOA derived from 'kms:GetPublicKey' on the
+  configured Hub keeper key. Mismatch = trust-root broken; Hub MUST refuse
+  to start.
+
+preconditions:
+  - hub.x402.splitter_contract_address is set (env: JECP_SPLITTER_ADDRESS)
+  - hub.x402.kms_keeper_key_id is set (env: JECP_X402_KMS_KEEPER_KEY_ID)
+  - hub has IAM permission for kms:GetPublicKey on the keeper key
+  - base RPC endpoint reachable (mainnet 8453 or sepolia 84532)
+
+steps:
+  - description: read AUTHORIZED_SETTLER from Splitter constructor
+    action: eth_call
+    target: ${hub.x402.splitter_contract_address}
+    method: "AUTHORIZED_SETTLER() view returns (address)"
+    capture:
+      onchain_settler: $.result
+
+  - description: derive keeper EOA from KMS public key
+    action: aws_kms_get_public_key
+    key_id: ${hub.x402.kms_keeper_key_id}
+    transform: secp256k1_pubkey_to_eth_address
+    capture:
+      derived_keeper_eoa: $.result
+
+  - description: compare addresses (constant-time, lowercase hex)
+    action: assert_equal
+    left: ${onchain_settler}
+    right: ${derived_keeper_eoa}
+    case_insensitive: true
+
+expect:
+  assertion_passed: true
+
+postconditions:
+  - audit_log row exists with action = "x402.trust_root_verified"
+  - Prometheus metric 'x402_authorized_settler_check_total{result="match"}' incremented
+  - Hub /health response includes field x402.trust_root with value "ok"
+
+failure_action: >
+  Hub MUST refuse to accept any new /v1/invoke requests with x402 method.
+  Hub /health MUST return degraded state with x402.trust_root set to "mismatch".
+  Operator MUST be paged (PagerDuty / equivalent).
+
+rationale: >
+  This is the rc3 trust-root positive assertion. Without this check, a
+  keeper key rotation (intended Splitter v2 redeploy) could silently drift
+  the keeper EOA from what the on-chain Splitter expects, causing
+  recordSettlement() calls to revert at runtime — corrupting the
+  settlement state machine.

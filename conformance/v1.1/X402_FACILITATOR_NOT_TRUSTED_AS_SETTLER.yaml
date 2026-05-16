@@ -1,0 +1,70 @@
+id: X402_FACILITATOR_NOT_TRUSTED_AS_SETTLER
+spec_section: spec/06-x402-integration.md §6.1 (trust-minimization principle)
+amendment: ADR-0003 Am-7 (rc3, 2026-05-16)
+severity: critical
+target: hub + splitter_contract
+category: rc3_trust_root_negative
+description: >
+  Under rc3, the x402.org facilitator is TRUST-MINIMIZED. It can only
+  execute the USDC pull from agent wallet to Splitter contract. It MUST
+  NOT be authorized to call Splitter.recordSettlement(...). This assertion
+  attempts to call recordSettlement from each known facilitator EOA and
+  verifies all calls revert with "not authorized settler".
+
+preconditions:
+  - hub.x402.splitter_contract_address is set
+  - base RPC endpoint reachable
+  - conformance/v1.1/fixtures/facilitator-fleet-eoas.txt lists known
+    x402.org facilitator EOAs (Canza, Coinbase x402 Facilitator 1-8, Daydreams,
+    X402rs, plus any newly observed)
+
+steps:
+  - description: load facilitator fleet EOAs
+    action: load_fixture
+    file: facilitator-fleet-eoas.txt
+    capture:
+      facilitator_eoas: $.lines
+
+  - description: for each facilitator EOA, attempt eth_call (simulated) of recordSettlement
+    action: foreach
+    items: ${facilitator_eoas}
+    do:
+      - action: eth_call_simulate
+        from: ${item}
+        to: ${hub.x402.splitter_contract_address}
+        method: >
+          recordSettlement(
+            bytes32 capabilityId,
+            address payer,
+            uint256 amountUsdc,
+            bytes32 txHash,
+            uint64 logIndex
+          )
+        args:
+          capabilityId: "0x0000000000000000000000000000000000000000000000000000000000000000"
+          payer: "0x0000000000000000000000000000000000000000"
+          amountUsdc: 1000000
+          txHash: "0x0000000000000000000000000000000000000000000000000000000000000001"
+          logIndex: 0
+        expect_revert: true
+        expect_revert_reason: "NotAuthorizedSettler"
+
+expect:
+  all_facilitator_calls_reverted: true
+
+postconditions:
+  - audit_log row count = len(facilitator_eoas) with action = "x402.unauthorized_settler_simulation"
+  - Prometheus metric `x402_unauthorized_settler_simulation_total` incremented by len(facilitator_eoas)
+
+failure_action: >
+  If ANY facilitator EOA can successfully call recordSettlement, GA gate
+  is BLOCKED. This indicates the Splitter AUTHORIZED_SETTLER was set
+  incorrectly during deploy. Mainnet deploy must be reverted (or, if
+  caught pre-deploy, the deploy script halted).
+
+rationale: >
+  This is the rc3 trust-root negative assertion. It explicitly verifies
+  the x402.org facilitator (a fleet of 8+ EOAs, not a single contract)
+  cannot abuse its position to write settlement records. This pairs with
+  the positive assertion (X402_HUB_KEEPER_AUTHORIZED_SETTLER_MATCH) to
+  fully characterize the rc3 trust boundary.
