@@ -1,0 +1,36 @@
+id: JECP-PROVIDER-MUST-REGISTER-REJECTS-UNSUPPORTED-COUNTRY
+level: MUST
+spec_section: "provider-register prose (country = ISO 3166-1 alpha-2, Stripe Connect supported list)"
+description: >
+  Conformant Hubs MUST reject Provider registration when the `country`
+  field is not a Stripe-Connect-supported ISO 3166-1 alpha-2 code. The
+  response MUST carry `error.code = "UNSUPPORTED_COUNTRY"` and HTTP 400.
+  This check runs BEFORE any DB write — accepting a Provider with an
+  unsupported country would later block payouts and trap the operator's
+  state mid-onboarding.
+
+request:
+  method: POST
+  path:   /v1/providers/register
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "namespace":     "test-country-reject",
+      "display_name":  "Country reject test",
+      "owner_email":   "ops@example.com",
+      "endpoint_url":  "https://test.example.com/jecp",
+      "country":       "XX"
+    }
+
+expected:
+  status: 400
+  body_jsonpath:
+    - { path: "$.error.code", equals: "UNSUPPORTED_COUNTRY" }
+    - { path: "$.error.message", regex: "Stripe Connect|supported" }
+
+notes: |
+  "XX" is the canonical "not a real country" placeholder used in test
+  vectors. If a Hub deployment legitimately supports XX (e.g. a private
+  fork with regional restrictions removed), this assertion can be
+  overridden via the runner's `JECP_CONFORMANCE_SKIP` env var.

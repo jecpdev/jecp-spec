@@ -1,0 +1,69 @@
+id: JECP-PROVIDER-MUST-AUTH-REQUIRED
+level: MUST
+spec_section: "Provider lifecycle prose: Bearer `<provider_api_key>` REQUIRED on /v1/providers/{me, verify-dns, me/rotate-key}, /v1/manifests"
+description: >
+  Conformant Hubs MUST reject Provider-side admin requests that do not
+  carry a valid `Authorization: Bearer <provider_api_key>` header. The
+  response MUST be HTTP 401 with `error.code` indicating a recognizable
+  auth failure (e.g. `INVALID_PROVIDER_KEY`, `MISSING_AUTH`, or
+  `UNAUTHORIZED`). Hubs that respond 200 or 4xx-without-auth-context on
+  these endpoints would expose Provider state to anonymous callers.
+
+  This assertion is run against ALL of the following request shapes; a
+  Hub passes only if every one of them returns 401 (or 403). The runner
+  iterates the request_variants array.
+
+request_variants:
+  - description: GET /v1/providers/me without Authorization header
+    request:
+      method:  GET
+      path:    /v1/providers/me
+
+  - description: POST /v1/providers/verify-dns without Authorization header
+    request:
+      method:  POST
+      path:    /v1/providers/verify-dns
+      headers:
+        Content-Type: application/json
+      body: "{}"
+
+  - description: POST /v1/providers/me/rotate-key without Authorization header
+    request:
+      method:  POST
+      path:    /v1/providers/me/rotate-key
+      headers:
+        Content-Type: application/json
+      body: "{}"
+
+  - description: POST /v1/manifests without Authorization header
+    request:
+      method:  POST
+      path:    /v1/manifests
+      headers:
+        Content-Type: application/x-yaml
+      body:    "namespace: test\ncapability: x\nversion: 1.0.0\n"
+
+  - description: POST /v1/providers/me/rotate-key with Bearer of obviously-fake key
+    request:
+      method:  POST
+      path:    /v1/providers/me/rotate-key
+      headers:
+        Content-Type: application/json
+        Authorization: "Bearer jdb_pk_0000000000000000000000000000000000000000000000000000"
+      body: "{}"
+
+expected:
+  status_in: [401, 403]
+  body_jsonpath:
+    - { path: "$.error.code", type: string }
+    - { path: "$.error.message", type: string }
+
+notes: |
+  We accept either 401 (RFC-correct for missing/invalid credentials) or
+  403 (some Hubs use 403 when the auth was syntactically present but
+  rejected). Both signal the same operator-visible outcome: anonymous
+  Provider-side admin is blocked.
+
+  This is the single largest preventable class of spec violation we've
+  seen in third-party Hub implementations during Sprint 6 review. Cover
+  it before any new Provider lifecycle work ships.

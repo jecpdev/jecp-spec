@@ -1,0 +1,40 @@
+id: JECP-PROVIDER-MUST-REGISTER-REJECTS-PRIVATE-IP
+level: MUST
+spec_section: "02-authentication.md §9.7.1.3 (CIDR deny-list) + error-catalog/URL_BLOCKED_SSRF.md"
+description: >
+  Conformant Hubs MUST reject Provider registration when `endpoint_url`
+  resolves to (or contains a literal in) the SSRF deny CIDR list: RFC1918,
+  loopback, link-local, CGNAT, IPv6 ULA. The response MUST carry
+  `error.code = "URL_BLOCKED_SSRF"`, HTTP 422, and
+  `error.details.reason ∈ {"resolved_to_deny_cidr"}`. Hubs that accept
+  private endpoints would forward Hub-side credentials and signed payloads
+  into the Hub's own internal network, a classic SSRF pivot.
+
+request:
+  method: POST
+  path:   /v1/providers/register
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "namespace":     "test-priv-ip-reject",
+      "display_name":  "Private IP reject test",
+      "owner_email":   "ops@example.com",
+      "endpoint_url":  "https://192.168.1.1/jecp",
+      "country":       "JP"
+    }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.error.code",                    equals: "URL_BLOCKED_SSRF" }
+    - { path: "$.error.details.field",           equals: "endpoint_url" }
+    - { path: "$.error.details.reason",          regex: "^(resolved_to_deny_cidr|host_syntax)$" }
+    - { path: "$.error.details.documentation_url", regex: "^https://jecp\\.dev/errors/url_blocked_ssrf" }
+
+notes: |
+  The reason regex permits either resolved_to_deny_cidr (Hub did DNS
+  resolution and matched against CIDR) or host_syntax (Hub rejected the
+  literal IP at the URL parser before reaching DNS). Both are conformant
+  outcomes — the assertion is that registration MUST fail and surface a
+  recognizable SSRF reason.

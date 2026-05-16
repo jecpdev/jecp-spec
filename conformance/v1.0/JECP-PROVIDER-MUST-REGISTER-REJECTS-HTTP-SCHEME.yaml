@@ -1,0 +1,38 @@
+id: JECP-PROVIDER-MUST-REGISTER-REJECTS-HTTP-SCHEME
+level: MUST
+spec_section: "02-authentication.md §9.7.1 (SSRF preflight) + error-catalog/URL_BLOCKED_SSRF.md"
+description: >
+  Conformant Hubs MUST reject Provider registration when `endpoint_url`
+  uses `http://` (or any scheme other than `https://`). The response MUST
+  carry `error.code = "URL_BLOCKED_SSRF"`, HTTP 422, and
+  `error.details.reason = "scheme"`. Accepting http:// would forward
+  inbound calls in plaintext, exposing the HMAC signature and request
+  payloads to network observers.
+
+request:
+  method: POST
+  path:   /v1/providers/register
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "namespace":     "test-http-reject",
+      "display_name":  "HTTP reject test",
+      "owner_email":   "ops@example.com",
+      "endpoint_url":  "http://example.com/jecp",
+      "country":       "JP"
+    }
+
+expected:
+  status: 422
+  body_jsonpath:
+    - { path: "$.error.code",                    equals: "URL_BLOCKED_SSRF" }
+    - { path: "$.error.details.field",           equals: "endpoint_url" }
+    - { path: "$.error.details.reason",          equals: "scheme" }
+    - { path: "$.error.details.documentation_url", regex: "^https://jecp\\.dev/errors/url_blocked_ssrf" }
+
+notes: |
+  Conformant Hubs MAY allow http:// in test mode (when the Hub is run with
+  X402_TEST_MODE=1 or equivalent); production deployments MUST NOT. Test
+  this assertion against the production target (https://jecp.dev) for
+  acceptance.

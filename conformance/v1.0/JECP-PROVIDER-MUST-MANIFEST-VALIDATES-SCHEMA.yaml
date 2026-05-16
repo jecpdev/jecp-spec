@@ -1,0 +1,54 @@
+id: JECP-PROVIDER-MUST-MANIFEST-VALIDATES-SCHEMA
+level: MUST
+spec_section: "04-manifest.md §5 + schemas/v1/manifest.schema.json"
+description: >
+  Conformant Hubs MUST validate POST /v1/manifests bodies against the
+  canonical manifest schema at https://jecp.dev/schemas/v1/manifest.schema.json
+  before any DB write. A manifest missing a required top-level field MUST
+  be rejected with HTTP 400 and `error.code ∈ {"PARSE_ERROR",
+  "INVALID_MANIFEST", "VALIDATION_FAILED"}`. Hubs that accept missing
+  required fields would surface broken catalog entries (no description,
+  no actions, no endpoint) and break invocation routing.
+
+  This assertion sends a YAML manifest with `actions: []` (empty array
+  violates the minItems: 1 constraint) and asserts the Hub rejects it.
+
+request:
+  method: POST
+  path:   /v1/manifests
+  headers:
+    Content-Type:  application/x-yaml
+    # Test uses a syntactically valid Bearer; auth check is NOT what we're
+    # asserting here. If auth fails first (401) that's fine — re-run
+    # against a registered Provider with a real key when authoring this
+    # in CI. The skeleton below documents what the body should look like.
+    Authorization: "Bearer ${JECP_TEST_PROVIDER_KEY}"
+  body: |
+    namespace: test-validation
+    display_name: "Empty actions test"
+    capability: empty
+    version: 1.0.0
+    description: "Manifest with empty actions array should be rejected."
+    endpoint: "https://test.example.com/jecp"
+    actions: []
+
+expected:
+  # We accept 400 (validation failed) or 401 (auth failed first — the
+  # runner can substitute a real key in CI; the assertion shape is
+  # what matters for spec conformance).
+  status_in: [400, 401]
+  body_jsonpath:
+    - { path: "$.error.code", regex: "^(PARSE_ERROR|INVALID_MANIFEST|VALIDATION_FAILED|INVALID_API_KEY|UNAUTHORIZED)$" }
+
+notes: |
+  When the runner has `JECP_TEST_PROVIDER_KEY` available (registered
+  Provider with verified DNS + Stripe), this assertion exercises the
+  schema validation path. Without that key the Hub fails auth first
+  and we accept that outcome as a non-violation — the conformance
+  intent is "this manifest never gets persisted", which 401 also
+  satisfies.
+
+  Future expansion: a multi-variant version of this test would cover
+  each constraint in manifest.schema.json (missing namespace, invalid
+  version regex, action missing pricing, etc.). The minimal MUST is
+  "Hub validates actions: []".

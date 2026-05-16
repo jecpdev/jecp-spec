@@ -1,0 +1,38 @@
+id: JECP-PROVIDER-MUST-REGISTER-REJECTS-INVALID-NAMESPACE
+level: MUST
+spec_section: "04-manifest.md §5 (namespace pattern) + provider-register prose"
+description: >
+  Conformant Hubs MUST reject POST /v1/providers/register requests whose
+  namespace does not match `^[a-z][a-z0-9-]{2,31}$`. The wire response MUST
+  carry `error.code = "INVALID_NAMESPACE"` and HTTP 400. Hubs that accept
+  malformed namespaces would later issue capability IDs that cannot be
+  represented in the catalog routing layer.
+
+request:
+  method: POST
+  path:   /v1/providers/register
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "namespace":     "1invalid",
+      "display_name":  "Test",
+      "owner_email":   "ops@example.com",
+      "endpoint_url":  "https://test.example.com/jecp",
+      "country":       "JP"
+    }
+
+expected:
+  status: 400
+  headers:
+    Content-Type:
+      present: true
+      contains: application/json
+  body_jsonpath:
+    - { path: "$.error.code",    equals: "INVALID_NAMESPACE" }
+    - { path: "$.error.message", type: string }
+
+notes: |
+  This assertion deliberately fails BEFORE any DB write — a Hub that issues
+  partial state (api_key without provider row, etc.) on validation failure
+  is non-conformant and unsafe to onboard a Provider against.

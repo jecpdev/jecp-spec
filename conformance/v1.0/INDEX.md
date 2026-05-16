@@ -42,7 +42,7 @@ Until those YAML files land, treat this INDEX as a **forward reference only** �
 ```
 JECP-<AREA>-<LEVEL>-<NUMBER>
 
-AREA   = WIRE | AUTH | PROV | DISCOVERY | OPS | META | BILLING | STREAM | COMPOSITE
+AREA   = WIRE | AUTH | PROV | DISCOVERY | OPS | META | BILLING | STREAM | COMPOSITE | PROVIDER
 LEVEL  = MUST | SHOULD | MAY
 NUMBER = zero-padded sequence within (AREA, LEVEL), e.g., 001, 002
 ```
@@ -56,6 +56,12 @@ Examples (for v1.0.2):
 - `JECP-WIRE-MUST-400-INPUT-SCHEMA` — input violates manifest input_schema → 400 INPUT_SCHEMA_VIOLATION
 - `JECP-DISCOVERY-MUST-001` — `/.well-known/agent-guide.json` returns 200 + valid schema
 - `JECP-OPS-MUST-BULKHEAD-ISOLATION` — read-pool saturation does not starve invoke-pool
+- `JECP-PROVIDER-MUST-REGISTER-REJECTS-INVALID-NAMESPACE` — namespace pattern violation → 400 INVALID_NAMESPACE
+- `JECP-PROVIDER-MUST-REGISTER-REJECTS-HTTP-SCHEME` — endpoint_url scheme ≠ https → 422 URL_BLOCKED_SSRF
+- `JECP-PROVIDER-MUST-REGISTER-REJECTS-PRIVATE-IP` — endpoint_url resolves to RFC1918 → 422 URL_BLOCKED_SSRF
+- `JECP-PROVIDER-MUST-REGISTER-REJECTS-UNSUPPORTED-COUNTRY` — country ∉ Stripe Connect set → 400 UNSUPPORTED_COUNTRY
+- `JECP-PROVIDER-MUST-AUTH-REQUIRED` — anonymous /v1/providers/{me, verify-dns, me/rotate-key} + /v1/manifests → 401/403
+- `JECP-PROVIDER-MUST-MANIFEST-VALIDATES-SCHEMA` — empty actions array → 400 (validates against manifest.schema.json)
 
 ## Coverage policy (mirror of `docs/jecp/phase0-locked-design.md` §8)
 
