@@ -1,6 +1,6 @@
 id: JECP-PROVIDER-MUST-MANIFEST-VALIDATES-SCHEMA
 level: MUST
-spec_section: "04-manifest.md §5 + schemas/v1/manifest.schema.json"
+spec_section: "04-manifest.md §5 + §6.1 + schemas/v1/manifest.schema.json"
 description: >
   Conformant Hubs MUST validate POST /v1/manifests bodies against the
   canonical manifest schema at https://jecp.dev/schemas/v1/manifest.schema.json
@@ -11,17 +11,27 @@ description: >
   no actions, no endpoint) and break invocation routing.
 
   This assertion sends a YAML manifest with `actions: []` (empty array
-  violates the minItems: 1 constraint) and asserts the Hub rejects it.
+  violates the minItems: 1 constraint) and asserts the Hub rejects it
+  with HTTP 400. The assertion is meaningless without a valid Provider
+  key — preconditions REQUIRE one — because without auth the Hub
+  short-circuits to 401 before the schema validator runs and we cannot
+  distinguish a Hub that validates schemas from one that does not.
+
+preconditions:
+  env_required:
+    - name: JECP_TEST_PROVIDER_KEY
+      description: >
+        Bearer token for a Provider with verified DNS + Stripe Connect
+        onboarding. Required to reach the schema validation path; without
+        it the Hub returns 401 before the validator runs and the assertion
+        cannot prove conformance. Runners that do not have this env var
+        configured MUST report this assertion as SKIPPED, not PASSED.
 
 request:
   method: POST
   path:   /v1/manifests
   headers:
     Content-Type:  application/x-yaml
-    # Test uses a syntactically valid Bearer; auth check is NOT what we're
-    # asserting here. If auth fails first (401) that's fine — re-run
-    # against a registered Provider with a real key when authoring this
-    # in CI. The skeleton below documents what the body should look like.
     Authorization: "Bearer ${JECP_TEST_PROVIDER_KEY}"
   body: |
     namespace: test-validation
@@ -33,20 +43,17 @@ request:
     actions: []
 
 expected:
-  # We accept 400 (validation failed) or 401 (auth failed first — the
-  # runner can substitute a real key in CI; the assertion shape is
-  # what matters for spec conformance).
-  status_in: [400, 401]
+  status_in: [400]
   body_jsonpath:
-    - { path: "$.error.code", regex: "^(PARSE_ERROR|INVALID_MANIFEST|VALIDATION_FAILED|INVALID_API_KEY|UNAUTHORIZED)$" }
+    - { path: "$.error.code", regex: "^(PARSE_ERROR|INVALID_MANIFEST|VALIDATION_FAILED)$" }
 
 notes: |
-  When the runner has `JECP_TEST_PROVIDER_KEY` available (registered
-  Provider with verified DNS + Stripe), this assertion exercises the
-  schema validation path. Without that key the Hub fails auth first
-  and we accept that outcome as a non-violation — the conformance
-  intent is "this manifest never gets persisted", which 401 also
-  satisfies.
+  Tightened in v1.0.3 (per spec-side review fix #4) to drop the previous
+  401 soft-pass. The earlier behaviour accepted "auth failed first" as a
+  conformance pass, which masked Hubs that never wired up schema
+  validation at all. The new contract: SKIP the assertion when
+  JECP_TEST_PROVIDER_KEY is absent; PASS only on a true 400+validation
+  rejection.
 
   Future expansion: a multi-variant version of this test would cover
   each constraint in manifest.schema.json (missing namespace, invalid

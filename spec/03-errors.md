@@ -498,6 +498,35 @@ The `details.documentation_url` field, when present, is a deep-link of the form 
 
 A Hub MUST NOT emit `details.subcause` until after it has authenticated the agent (via `X-API-Key` or equivalent). This prevents the subcause registry from acting as an enumeration oracle for unauthenticated callers — same rule as `PROVENANCE_MISMATCH` (§3.1).
 
+### 3.9 Provider Self-Service Endpoints (Stage 3)
+
+These error codes fire only on the Provider-admin endpoints defined in 04-manifest.md §8.6 (`POST /v1/providers/verify-dns`, `POST /v1/providers/me/rotate-key`). They are never emitted on agent-facing wire calls (`POST /v1/invoke`, etc.). Hubs that do not yet implement Stage 3 (third-party Provider acceptance) never emit these codes.
+
+#### `DNS_VERIFICATION_FAILED`
+
+- **HTTP**: 422
+- **Cause**: The Provider invoked `POST /v1/providers/verify-dns` (04-manifest.md §8.6.2) but the Hub could not find a matching `_jecp.<domain>` TXT record carrying `jecp-verify=<token>` against the domain extracted from `provider.endpoint_url`. Either the record is absent, the token mismatches, or DNS propagation has not completed.
+- **Retry-safe**: Yes (after the Provider publishes / corrects the TXT record and DNS propagates)
+- **`details`**: `{ "domain": "<host>", "expected_token_prefix": "<first 8 chars>", "reason": "txt_record_missing" | "txt_record_mismatch" | "nxdomain" }`
+- **Recovery**: Publish the TXT record per 04-manifest.md §8.2, wait for propagation (typically < 5 minutes for low-TTL zones), then re-call `POST /v1/providers/verify-dns`.
+
+#### `ROTATION_24H_CAP`
+
+- **HTTP**: 429
+- **Cause**: The Provider invoked `POST /v1/providers/me/rotate-key` (04-manifest.md §8.6.3) but has already rotated the maximum number of times allowed in a sliding 24-hour window (default 3). The request has NO effect on the existing key.
+- **Retry-safe**: Yes (after the oldest rotation in the window ages out)
+- **Headers (SHOULD)**: `Retry-After: <integer-seconds>` indicating when the next rotation slot opens.
+- **`details`**: `{ "limit_per_24h": <int>, "rotations_in_last_24h": <int>, "next_slot_at": "<RFC 3339>" }`
+- **Recovery**: Wait until `next_slot_at`. Operators MAY adjust the cap via Hub configuration; agents/Providers cannot.
+
+#### `ROTATION_RACE`
+
+- **HTTP**: 409
+- **Cause**: The Provider invoked `POST /v1/providers/me/rotate-key` but the Provider record was modified or deleted by a concurrent administrative action mid-transaction (e.g., Provider deleted, or another rotation racing with row-level lock contention). No new key is issued and the existing key is unchanged.
+- **Retry-safe**: Yes (re-issue the call once the contending operation completes)
+- **`details`**: `{ "reason": "row_locked" | "provider_disappeared" }`
+- **Recovery**: Retry the call after a brief backoff (100-500 ms). If `provider_disappeared`, the Provider record has been removed and the Provider must re-register.
+
 ## 4. `next_action` Object
 
 Errors that have a clear recovery path SHOULD include a `next_action` object with machine-readable guidance.

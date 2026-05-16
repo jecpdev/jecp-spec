@@ -48,7 +48,7 @@ UTF-8 without BOM.
 > **Reference fixture**: [`fixtures/manifest-minimal-valid.json`](../fixtures/manifest-minimal-valid.json) is the smallest manifest that validates. Conformance harnesses MAY use it as a positive baseline.
 
 ```yaml
-# Manifest schema (YAML representation; JSON Schema below)
+# Manifest schema (YAML representation; canonical JSON Schema at schemas/v1/manifest.schema.json)
 
 # ─── Provider identity ───
 namespace: <string>           # MUST. ^[a-z][a-z0-9-]{2,31}$
@@ -68,9 +68,10 @@ tags: [<string>]              # MAY. <= 8 tags, each <= 32 chars
 endpoint: <https url>         # MUST. Hub forwards to this URL
 streaming: <bool>             # MAY. Default false
 authentication:               # SHOULD
-  type: api_key | mtls | oauth2
+  type: api_key               # v1.0 supports only api_key (HMAC-signed header).
+                              # mtls and oauth2 are reserved for v1.1+ with
+                              # per-type subschemas.
   header_name: <string>       # for type=api_key
-  # mtls / oauth2 fields per type
 
 # ─── Actions ───
 actions:                      # MUST. Non-empty array
@@ -137,152 +138,9 @@ extensions: { ... }           # Vendor-specific
 
 ### 5.1 JSON Schema (formal)
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jecp.dev/schemas/v1/manifest.json",
-  "type": "object",
-  "required": ["namespace", "display_name", "capability", "version", "description", "endpoint", "actions"],
-  "properties": {
-    "namespace":     { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,31}$" },
-    "display_name":  { "type": "string", "minLength": 2, "maxLength": 100 },
-    "website":       { "type": "string", "format": "uri" },
-    "support_email": { "type": "string", "format": "email" },
-    "documentation": { "type": "string", "format": "uri" },
-    "logo_url":      { "type": "string", "format": "uri" },
-    "capability":    { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
-    "version":       { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
-    "description":   { "type": "string", "maxLength": 500 },
-    "tags":          { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 32 } },
-    "endpoint":      { "type": "string", "format": "uri", "pattern": "^https://" },
-    "streaming":     { "type": "boolean", "default": false },
-    "authentication": { "$ref": "#/$defs/Authentication" },
-    "actions":       { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Action" } },
-    "compliance":    { "$ref": "#/$defs/Compliance" },
-    "billing":       { "$ref": "#/$defs/Billing" },
-    "deprecation":   { "$ref": "#/$defs/Deprecation" },
-    "metadata":      { "type": "object" },
-    "extensions":    { "type": "object" }
-  },
-  "$defs": {
-    "Action": {
-      "type": "object",
-      "required": ["id", "description", "pricing", "input_schema", "output_schema"],
-      "properties": {
-        "id":          { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
-        "name":        { "type": "string", "maxLength": 100 },
-        "description": { "type": "string", "maxLength": 300 },
-        "streaming":   { "type": "boolean", "default": false },
-        "pricing":     { "$ref": "#/$defs/Pricing" },
-        "trust_tier_required": { "enum": ["bronze","silver","gold","platinum"] },
-        "rate_limit_rpm": { "type": "integer", "minimum": 0 },
-        "input_schema":  { "type": "object" },
-        "output_schema": { "type": "object" },
-        "examples":      { "type": "array", "items": { "type": "object" } },
-        "side_effects":  { "$ref": "#/$defs/SideEffects" },
-        "sla":           { "$ref": "#/$defs/Sla" },
-        "composes":     { "$ref": "#/$defs/Composes" }
-      },
-      "allOf": [
-        { "not": { "required": ["composes", "streaming"] } }
-      ]
-    },
-    "Composes": {
-      "type": "object",
-      "required": ["steps"],
-      "properties": {
-        "max_depth":         { "type": "integer", "minimum": 1, "maximum": 1, "default": 1 },
-        "on_step_failure":   { "enum": ["rollback", "continue"], "default": "rollback" },
-        "timeout_total_ms":  { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 60000 },
-        "steps": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 8,
-          "items":   { "$ref": "#/$defs/CompositeStep" }
-        }
-      }
-    },
-    "CompositeStep": {
-      "type": "object",
-      "required": ["id", "call", "action", "input"],
-      "properties": {
-        "id":     { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$" },
-        "call":   { "type": "string", "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$" },
-        "action": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "input":  { "type": "object" }
-      }
-    },
-    "Pricing": {
-      "type": "object",
-      "required": ["base", "currency", "model"],
-      "properties": {
-        "base":     { "type": "string", "pattern": "^\\$\\d+(\\.\\d+)?$" },
-        "currency": {
-          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, CAD, AUD, CHF, KRW, SGD, HKD, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). The literal 'both' is retained for backward compatibility with v1.0-draft Providers and means USD+USDC; new Providers SHOULD pick a single concrete currency.",
-          "type": "string",
-          "pattern": "^([A-Z]{3,5}|both)$"
-        },
-        "model":    { "enum": ["flat", "per_call", "per_token", "per_chunk", "per_second", "tiered"] },
-        "input_per_token_usdc":  { "type": "number", "minimum": 0 },
-        "output_per_token_usdc": { "type": "number", "minimum": 0 },
-        "per_chunk_usdc":        { "type": "number", "minimum": 0 },
-        "audio_per_second_usdc": { "type": "number", "minimum": 0 }
-      }
-    },
-    "Authentication": {
-      "type": "object",
-      "required": ["type"],
-      "properties": {
-        "type":        { "enum": ["api_key", "mtls", "oauth2"] },
-        "header_name": { "type": "string" }
-      }
-    },
-    "SideEffects": {
-      "type": "object",
-      "properties": {
-        "external_api_call": { "type": "boolean" },
-        "stores_data":       { "type": "boolean" },
-        "modifies_state":    { "type": "boolean" },
-        "sends_email":       { "type": "boolean" }
-      }
-    },
-    "Sla": {
-      "type": "object",
-      "properties": {
-        "latency_p95_ms": { "type": "integer", "minimum": 1 },
-        "timeout_ms":     { "type": "integer", "minimum": 1000, "maximum": 300000 }
-      }
-    },
-    "Compliance": {
-      "type": "object",
-      "properties": {
-        "pii_handling":   { "enum": ["process_only_no_store", "store_with_consent"] },
-        "gdpr_compliant": { "type": "boolean" },
-        "data_residency": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "Billing": {
-      "type": "object",
-      "properties": {
-        "payout_currency": {
-          "description": "ISO 4217 alpha-3 fiat code (USD, JPY, EUR, GBP, ...) or crypto extension code (USDC, USDT, BTC, ETH, MATIC). MUST be a currency that the Hub's underlying payment processor (e.g., Stripe Connect for fiat, on-chain settlement for crypto) supports for the Provider's registered country. Hubs MUST further restrict acceptance to a closed list of supported currencies (the regex is permissive intentionally — closed-list enforcement is Hub-side per §6.1).",
-          "type": "string",
-          "pattern": "^([A-Z]{3,5}|both)$"
-        },
-        "stripe_connect_required": { "type": "boolean" }
-      }
-    },
-    "Deprecation": {
-      "type": "object",
-      "properties": {
-        "status":            { "enum": ["active", "deprecated", "sunset"] },
-        "sunset_at":         { "type": "string", "format": "date-time" },
-        "successor_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
-      }
-    }
-  }
-}
-```
+The canonical machine-readable schema lives at [`schemas/v1/manifest.schema.json`](../schemas/v1/manifest.schema.json). Implementers MUST validate against that file. The YAML reference at §5 above is the human-readable summary; on any disagreement between prose and schema, the schema is authoritative.
+
+The canonical schema declares `additionalProperties: false` on the root and on every `$def`, narrows several enums beyond the prose summary (e.g. `Authentication.type: ["api_key"]` for v1.0; v1.1+ will add `mtls` and `oauth2`), and adds an `if/then` conditional on `Deprecation` requiring `sunset_at` whenever `status ∈ {deprecated, sunset}`. Refer to the schema file for the authoritative constraints.
 
 ## 5.2 Composite Actions (M3 / Workflow)
 
@@ -506,6 +364,121 @@ draft  →  submitted  →  validated  →  active
 ```
 
 A Provider MAY recall a Manifest before activation. After activation, only deprecation/sunset transitions are allowed.
+
+### 8.6 Provider Self-Service Endpoints
+
+Once a Provider has completed `POST /v1/providers/register` (§8.1) and holds a valid `provider_api_key`, three self-service endpoints let the Provider inspect and maintain its own record. All three are authenticated with `Authorization: Bearer <provider_api_key>` and MUST be exposed by Conformant Hubs at Stage 3.
+
+These endpoints are first-party admin surfaces; the Hub MUST reject any request without a valid `provider_api_key` with HTTP 401 carrying a JECP error envelope (see [`spec/03-errors.md`](03-errors.md) and the [`AUTH_REQUIRED`](03-errors.md#auth_required) definition). Conformance: see [`JECP-PROVIDER-MUST-AUTH-REQUIRED`](../conformance/v1.0/JECP-PROVIDER-MUST-AUTH-REQUIRED.yaml).
+
+#### 8.6.1 `GET /v1/providers/me`
+
+Returns the current Provider record.
+
+**Auth**: `Authorization: Bearer <provider_api_key>` (REQUIRED).
+
+**Request**: no body.
+
+**Response 200 (JSON)**:
+
+```json
+{
+  "provider_id":     "<uuid>",
+  "namespace":       "deepl",
+  "display_name":    "DeepL Translation",
+  "status":          "verified",
+  "dns_verified":    true,
+  "stripe_verified": true,
+  "endpoint_url":    "https://api.deepl.com/jecp/v1",
+  "total_calls":     42
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `provider_id` | string (UUID) | Stable Provider identifier. |
+| `namespace` | string | Provider namespace; immutable post-registration. |
+| `display_name` | string | Human-readable name. |
+| `status` | string | Lifecycle status — one of `pending`, `dns_pending`, `verified`, `suspended`. |
+| `dns_verified` | bool | `true` after a successful DNS TXT check (see §8.2). |
+| `stripe_verified` | bool | `true` after Stripe Connect onboarding (see §8.3). |
+| `endpoint_url` | string \| null | URL the Hub forwards `/v1/invoke` calls to. |
+| `total_calls` | integer | Cumulative successful invocation count. |
+
+**Errors**: [`AUTH_REQUIRED`](03-errors.md#auth_required) (401), [`INVALID_API_KEY`](03-errors.md#invalid_api_key) (401), [`PROVIDER_NOT_FOUND`](03-errors.md#provider_not_found) (404 — Provider deleted).
+
+#### 8.6.2 `POST /v1/providers/verify-dns`
+
+Re-triggers DNS TXT verification against the `endpoint_url`'s domain. Hubs MUST extract the domain server-side from `endpoint_url` rather than trust a client-supplied value; this prevents a Provider api_key holder from forcing DNS verification against a domain they don't control.
+
+**Auth**: `Authorization: Bearer <provider_api_key>` (REQUIRED).
+
+**Request body** (JSON, OPTIONAL):
+
+```json
+{ "domain": "deepl.com" }
+```
+
+If `domain` is supplied, it MUST equal the host extracted from `provider.endpoint_url`; mismatch is rejected with HTTP 400 / `INVALID_REQUEST`. The field is a client-side sanity check, never authoritative.
+
+**Response 200 (JSON)**:
+
+```json
+{
+  "verified": true,
+  "status":   "verified",
+  "message":  "TXT record matched expected token"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `verified` | bool | `true` on a successful TXT match. |
+| `status` | string | New `providers.status` after the call. |
+| `message` | string | Human-readable summary. On failure, names the missing or mismatched token. |
+
+**Errors**: [`AUTH_REQUIRED`](03-errors.md#auth_required) (401), [`INVALID_API_KEY`](03-errors.md#invalid_api_key) (401), [`INVALID_REQUEST`](03-errors.md#invalid_request) (400 — domain mismatch or malformed body), [`DNS_VERIFICATION_FAILED`](03-errors.md#dns_verification_failed) (422 — TXT record absent or mismatched).
+
+#### 8.6.3 `POST /v1/providers/me/rotate-key`
+
+Atomically invalidates the current `provider_api_key` and issues a new one. Hubs MUST execute the invalidation, the rotation-counter increment, and the new-key write as a single transaction protected by a row-level lock on the Provider record; concurrent callers serialise on that lock so that either all three writes commit together or none do.
+
+**Auth**: `Authorization: Bearer <current_provider_api_key>` (REQUIRED).
+
+**Request body** (JSON, OPTIONAL):
+
+```json
+{
+  "grace_seconds": 3600,
+  "revoke_old":    false
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `grace_seconds` | integer (0 .. 86_400) | 3600 | How long the previous key remains valid alongside the new one. Hub MAY clamp; the effective value is returned in the response. Ignored (forced to 0) when `revoke_old=true`. |
+| `revoke_old` | bool | `false` | When `true`, the previous key is rejected immediately (no grace period). Use when key compromise is suspected. |
+
+**Response 200 (JSON)**:
+
+```json
+{
+  "jecp":                     "1.0",
+  "provider_id":              "<uuid>",
+  "namespace":                "deepl",
+  "api_key":                  "jdb_pk_<48-hex>",
+  "api_key_prefix":           "jdb_pk_<8-hex>",
+  "previous_key_valid_until": "2026-05-16T13:00:00Z",
+  "grace_seconds":            3600,
+  "revoke_old":               false,
+  "rotations_in_last_24h":    1,
+  "warning":                  "This api_key is shown only once. Store it now. ..."
+}
+```
+
+The Hub MUST enforce a 24-hour rotation cap (default 3 successful rotations per Provider). Exceeding the cap returns HTTP 429 / `ROTATION_24H_CAP` and the request has NO effect on the existing key.
+
+**Errors**: [`AUTH_REQUIRED`](03-errors.md#auth_required) (401), [`INVALID_API_KEY`](03-errors.md#invalid_api_key) (401), [`INVALID_REQUEST`](03-errors.md#invalid_request) (400 — body present but not valid JSON), [`ROTATION_24H_CAP`](03-errors.md#rotation_24h_cap) (429), [`ROTATION_RACE`](03-errors.md#rotation_race) (409 — Provider record disappeared mid-transaction).
 
 ## 9. Example Manifest
 

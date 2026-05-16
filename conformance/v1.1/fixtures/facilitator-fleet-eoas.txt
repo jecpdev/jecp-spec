@@ -1,0 +1,45 @@
+# x402.org facilitator EOA fleet (auto-updated from BaseScan)
+#
+# Last updated: 2026-05-16 (PLACEHOLDER pending BaseScan verification —
+# the entries below are non-authoritative until they are re-pulled from
+# the canonical on-chain source. See feedback_verify_facilitator_on_chain.md
+# in the JobDoneBot release-prep set for the verification procedure.)
+#
+# Format: one EOA address per line (lowercase, 0x-prefixed, 40 hex chars).
+# Comment lines start with `#` and are ignored by the harness.
+# Blank lines are also ignored.
+#
+# Provenance: each entry MUST be reconfirmed against on-chain activity
+# attributable to the named operator before being relied on for
+# X402_FACILITATOR_NOT_TRUSTED_AS_SETTLER (rc3 keeper batch). The list is
+# intentionally permissive at the conformance layer — the assertion checks
+# that NONE of the listed EOAs can call recordSettlement on the Splitter
+# contract, so an over-inclusive list is safer than an under-inclusive one.
+#
+# Known operators (PLACEHOLDER — DO NOT trust until verified):
+#
+# Coinbase x402 Facilitator 1
+# 0x0000000000000000000000000000000000000001
+#
+# Coinbase x402 Facilitator 2
+# 0x0000000000000000000000000000000000000002
+#
+# Coinbase x402 Facilitator 3-8
+# 0x0000000000000000000000000000000000000003
+# 0x0000000000000000000000000000000000000004
+# 0x0000000000000000000000000000000000000005
+# 0x0000000000000000000000000000000000000006
+# 0x0000000000000000000000000000000000000007
+# 0x0000000000000000000000000000000000000008
+#
+# Canza
+# 0x0000000000000000000000000000000000000009
+#
+# Daydreams
+# 0x000000000000000000000000000000000000000a
+#
+# X402rs
+# 0x000000000000000000000000000000000000000b
+#
+# Newly observed (placeholder slot — populate from BaseScan)
+# 0x000000000000000000000000000000000000000c

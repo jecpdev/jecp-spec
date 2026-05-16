@@ -8,7 +8,7 @@ Each assertion is a single YAML file at `conformance/v1.1/<id>.yaml` with a self
 
 Fixture references inside YAMLs:
 - `${fixtures.x402.<name>}` — placeholder consumed by the conformance harness, resolved from the JSON files in this directory.
-- `conformance/v1.1/fixtures/<file>` — direct relative path (used only by the rc3 keeper assertions for `idempotency-pull-event.json` and `facilitator-fleet-eoas.txt`). These fixture files are not yet committed; they will land alongside the keeper-rc3 fixture batch.
+- `conformance/v1.1/fixtures/<file>` — direct relative path (used by the rc3 keeper assertions for `idempotency-pull-event.json` and `facilitator-fleet-eoas.txt`). Both fixtures are committed as PLACEHOLDER (2026-05-16) — `idempotency-pull-event.json` uses a deterministic `tx_hash` and a `${TEST_AGENT_EOA}` substitution placeholder for `payer`; `facilitator-fleet-eoas.txt` lists known operators behind `#`-prefixed comment lines pending BaseScan verification (see `feedback_verify_facilitator_on_chain.md` in the JobDoneBot release-prep notes). The harness MAY run the YAMLs that reference them, but the keeper batch is only declared "runnable for GA gate" once the comment-only EOA lines are uncommented after on-chain verification.
 
 ## Assertion list
 
@@ -63,10 +63,10 @@ JSON fixtures resolved via `${fixtures.x402.<name>}`:
 - `x402-happy-path-pure.json`, `x402-happy-path-wallet-fallback.json`
 - `x402-error-facilitator-unreachable.json`, `x402-error-not-accepted.json`, `x402-error-payment-invalid.json`, `x402-error-settlement-reused.json`, `x402-error-settlement-timeout.json`
 
-Fixture files referenced by path (rc3 keeper batch — to be committed alongside fixture rollout):
+Fixture files referenced by path (rc3 keeper batch — committed 2026-05-16, PLACEHOLDER pending verification):
 
-- `conformance/v1.1/fixtures/idempotency-pull-event.json` — deterministic pull-event fixture for replay test
-- `conformance/v1.1/fixtures/facilitator-fleet-eoas.txt` — observed facilitator EOA list (Coinbase x402 Facilitator 1-8, Canza, Daydreams, X402rs, plus newly-observed entries)
+- `conformance/v1.1/fixtures/idempotency-pull-event.json` — deterministic pull-event fixture for replay test (PLACEHOLDER `payer` uses `${TEST_AGENT_EOA}` substitution)
+- `conformance/v1.1/fixtures/facilitator-fleet-eoas.txt` — observed facilitator EOA list (Coinbase x402 Facilitator 1-8, Canza, Daydreams, X402rs, plus newly-observed entries). All entries currently `#`-commented; uncomment after BaseScan verification per `feedback_verify_facilitator_on_chain.md`.
 
 ## Coverage policy
 

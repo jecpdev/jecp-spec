@@ -33,7 +33,20 @@ The Hub's response carries `error.details.reason` to disambiguate WHY the URL wa
 | `scheme` | Scheme was not `https` (or `http` outside test mode) | Use `https://` in production |
 | `host_syntax` | Host was percent-encoded or otherwise malformed | Normalize to plain ASCII / IDN-decoded form |
 | `resolved_to_deny_cidr` | Hostname resolved to a deny-list CIDR | Use a domain name that resolves to a public IP, OR ask the Hub operator to extend the allowlist |
-| `connect_pin_violation` | Resolver returned a different address at `connect()` than at validation (DNS rebinding) | Stop using TTL-1 / split-horizon DNS; ensure A/AAAA records are stable |
+| `dns_resolve_failed` | Hostname could not be resolved at all (NXDOMAIN, network unreachable, timeout) | Verify the hostname is publicly resolvable; check authoritative DNS health |
+| `connect_pin_violation` | _[v1.1.x preview — reserved, not yet emitted by the reference Hub]_ Resolver returned a different address at `connect()` than at validation (DNS rebinding) | Stop using TTL-1 / split-horizon DNS; ensure A/AAAA records are stable |
+
+### `dns_resolve_failed`
+
+**What it means**: The Hub attempted to resolve the hostname in the supplied URL via its configured resolver(s) and got no A/AAAA records back at all — typically NXDOMAIN, SERVFAIL, network unreachable, or resolver timeout. The host is not necessarily hostile; it is just unreachable from the Hub's network position at this moment.
+
+**When it fires**: At register-time (`POST /v1/providers/register`, `POST /v1/providers/verify-dns`) and at deref-time (outbound forward in `POST /v1/invoke`, webhook delivery). The Hub treats this as a soft-fail at register time — the caller MAY retry once DNS has propagated. At deref-time the call is rejected immediately so the Hub does not stall on a dead Provider.
+
+**Fix in 30s**:
+
+1. `dig +short <hostname>` from a public network. If you get nothing back, your authoritative DNS or registrar is the problem.
+2. If the hostname is brand-new, wait for TTL propagation (typically 60-300s for cloud DNS, longer for traditional registrars).
+3. Confirm the Hub can reach the public internet — coordinated `dns_resolve_failed` across many Providers points at a Hub-side resolver outage, not a Provider problem.
 
 ## Example response
 

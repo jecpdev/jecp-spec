@@ -225,8 +225,8 @@
         },
         "action": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Action id within the target capability."
+          "pattern": "^[a-z][a-z0-9-]{2,63}$",
+          "description": "Action id within the target capability. MUST match the Action.id pattern (3-64 chars, [a-z][a-z0-9-])."
         },
         "input": {
           "type": "object",
@@ -279,12 +279,13 @@
 
     "Authentication": {
       "type": "object",
+      "description": "Auth scheme for inbound Hub-forwarded calls. v1.0 supports `api_key` only (HMAC-signed header). v1.1+ will add `mtls` and `oauth2` with per-type subschemas.",
       "required": ["type"],
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["api_key", "mtls", "oauth2"],
-          "description": "Auth scheme the Provider expects on inbound Hub-forwarded calls. v1.0 reference Hub implements only api_key (HMAC-signed header)."
+          "enum": ["api_key"],
+          "description": "Auth scheme the Provider expects on inbound Hub-forwarded calls. v1.0 supports `api_key` only. `mtls` and `oauth2` are reserved for v1.1+ where per-type subschemas will land."
         },
         "header_name": {
           "type": "string",
@@ -379,6 +380,15 @@
           "pattern": "^\\d+\\.\\d+\\.\\d+$",
           "description": "Semver of the replacement version. Surfaced as details.successor in CAPABILITY_DEPRECATED responses."
         }
+      },
+      "if": {
+        "properties": {
+          "status": { "enum": ["deprecated", "sunset"] }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["sunset_at"]
       }
     }
   }

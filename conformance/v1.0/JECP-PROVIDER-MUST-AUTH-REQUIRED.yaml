@@ -1,13 +1,13 @@
 id: JECP-PROVIDER-MUST-AUTH-REQUIRED
 level: MUST
-spec_section: "Provider lifecycle prose: Bearer `<provider_api_key>` REQUIRED on /v1/providers/{me, verify-dns, me/rotate-key}, /v1/manifests"
+spec_section: "spec/04-manifest.md §8.6 Provider Self-Service Endpoints + §8.4 Manifest Submission — Bearer `<provider_api_key>` REQUIRED on /v1/providers/{me, verify-dns, me/rotate-key} and POST /v1/manifests"
 description: >
   Conformant Hubs MUST reject Provider-side admin requests that do not
   carry a valid `Authorization: Bearer <provider_api_key>` header. The
   response MUST be HTTP 401 with `error.code` indicating a recognizable
-  auth failure (e.g. `INVALID_PROVIDER_KEY`, `MISSING_AUTH`, or
-  `UNAUTHORIZED`). Hubs that respond 200 or 4xx-without-auth-context on
-  these endpoints would expose Provider state to anonymous callers.
+  auth failure (e.g. `AUTH_REQUIRED` or `INVALID_API_KEY`, per
+  spec/03-errors.md §3.1). Hubs that respond 200 or 4xx-without-auth-context
+  on these endpoints would expose Provider state to anonymous callers.
 
   This assertion is run against ALL of the following request shapes; a
   Hub passes only if every one of them returns 401 (or 403). The runner

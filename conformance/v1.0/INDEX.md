@@ -11,6 +11,10 @@ id:           JECP-<AREA>-<LEVEL>-<NUMBER>     # e.g., JECP-WIRE-MUST-415
 level:        MUST | SHOULD | MAY               # RFC 2119 keyword
 spec_section: "<doc>.md §<n>"                   # source citation
 description:  "<one-sentence assertion>"
+preconditions:                                  # OPTIONAL (v1.0.3+)
+  env_required:                                 # list of required env vars
+    - name: JECP_TEST_PROVIDER_KEY
+      description: "<why this env var is needed>"
 request:
   method:     GET | POST | ...
   path:       /v1/<endpoint>
@@ -22,6 +26,12 @@ expected:
   body_jsonpath:                                # optional
     - { path: "$.error.code", equals: "<code>" }
 ```
+
+### `preconditions` semantics (added v1.0.3)
+
+When an assertion declares `preconditions.env_required`, the runner MUST check that every named env var is defined and non-empty BEFORE executing the request. If any required env var is missing, the runner reports the assertion as **SKIPPED** (distinct from PASSED and FAILED) in both the JUnit XML output (`<skipped/>` child element) and the Markdown report. A SKIPPED assertion does NOT contribute to the conformance pass-rate calculation.
+
+This addition lets us tighten assertions whose validation path is gated by external state (e.g., a valid Provider key) without falling back to permissive `status_in` ranges that pass for the wrong reason.
 
 The runner is `scripts/jecp-conformance.sh` (Phase 0 / c10) — a bash + python3 harness that walks this directory, executes each assertion against `${TARGET}` (default `https://jecp.dev`), and emits JUnit XML + Markdown report. The same logic ships as `npx @jecpdev/conformance` and `docker run ghcr.io/jecpdev/conformance:v1.x` in Phase 2.
 
@@ -49,7 +59,7 @@ NUMBER = zero-padded sequence within (AREA, LEVEL), e.g., 001, 002
 
 Examples (for v1.0.2):
 - `JECP-WIRE-MUST-415` — Content-Type ≠ application/json → 415
-- `JECP-WIRE-MUST-409-DUP-SAME` — same id + same input replay → 409
+- `JECP-WIRE-MUST-409-DUP-IDEMPOTENT-NO-CONFLICT` — same id + same input replay → 409 idempotent no-conflict
 - `JECP-WIRE-MUST-409-DUP-DIFFERENT-INPUT` — same id + different input → 400 INVALID_REQUEST (negative case)
 - `JECP-WIRE-MUST-410-SUNSET` — sunset capability → 410 + Sunset header
 - `JECP-WIRE-MUST-429-RETRY-AFTER` — burst → 429 + Retry-After ∈ [1, 600]

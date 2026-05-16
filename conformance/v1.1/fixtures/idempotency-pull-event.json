@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment_status": "PLACEHOLDER fixture. The chain_id targets Base Sepolia (84532) for safety. The tx_hash + payer + amount values are deterministic stand-ins so the conformance harness can produce reproducible runs. Replace `payer` with the actual test agent's EOA at runtime, OR rely on the harness to fill it from `${TEST_AGENT_EOA}`. Authored 2026-05-16 for the rc3 keeper batch (ADR-0003 Am-7).",
+  "_comment_usage": "Referenced by conformance/v1.1/X402_RECORD_SETTLEMENT_IDEMPOTENT.yaml via the `x402_pull_fixture: idempotency-pull-event` directive. The harness loads this file, substitutes ${TEST_AGENT_EOA} into `payer`, and submits the resulting event TWICE to assert the keeper rejects the duplicate on (chain_id, tx_hash, log_index).",
+
+  "chain_id": 84532,
+  "tx_hash": "0xidempotency_fixture_pull_event_v1",
+  "log_index": 0,
+  "payer": "${TEST_AGENT_EOA}",
+  "amount_usdc_micro": 5000
+}
