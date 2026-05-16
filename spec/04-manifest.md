@@ -43,6 +43,10 @@ UTF-8 without BOM.
 
 ## 5. Schema
 
+> **Machine-readable schema**: [`schemas/v1/manifest.schema.json`](../schemas/v1/manifest.schema.json) is the canonical JSON Schema 2020-12 file. Validators (CLIs, IDE plugins, CI lint, Hub publish acceptance) MUST load that file; the YAML / JSON snippets below are the human-readable reference and are kept in sync.
+>
+> **Reference fixture**: [`fixtures/manifest-minimal-valid.json`](../fixtures/manifest-minimal-valid.json) is the smallest manifest that validates. Conformance harnesses MAY use it as a positive baseline.
+
 ```yaml
 # Manifest schema (YAML representation; JSON Schema below)
 

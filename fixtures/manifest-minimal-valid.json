@@ -1,0 +1,41 @@
+{
+  "namespace": "example",
+  "display_name": "Example Translator",
+  "capability": "translate",
+  "version": "1.0.0",
+  "description": "Translate text between supported languages.",
+  "endpoint": "https://example.com/jecp",
+  "actions": [
+    {
+      "id": "translate",
+      "name": "Translate text",
+      "description": "Translate input text to the target language.",
+      "pricing": {
+        "base": "$0.005",
+        "currency": "USDC",
+        "model": "per_call"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": ["text", "target_lang"],
+        "properties": {
+          "text":        { "type": "string", "maxLength": 5000 },
+          "target_lang": { "type": "string", "pattern": "^[a-z]{2}$" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "translation":   { "type": "string" },
+          "detected_lang": { "type": "string" }
+        }
+      },
+      "examples": [
+        {
+          "input":  { "text": "Hello", "target_lang": "ja" },
+          "output": { "translation": "こんにちは", "detected_lang": "en" }
+        }
+      ]
+    }
+  ]
+}
