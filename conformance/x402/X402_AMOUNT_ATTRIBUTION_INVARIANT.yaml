@@ -8,7 +8,7 @@ threat_id: "Panel 2 §3.4 TM-X4 (reorg); Panel 4 §2.2 (fund-attribution drift);
 severity: critical
 target: hub
 priority: must
-evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#64-invariants"
+evidence_url: "https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e32-new-invariant-i-7-amount-attribution"
 description: >
   For every capability_id observed in the system, the following
   invariant MUST hold at all times outside the open reconciler-tick
@@ -95,6 +95,6 @@ postconditions:
 
 introduced_in: v1.1.0-rc3
 references:
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#64-invariants
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e32-new-invariant-i-7-amount-attribution
   - "ADR-0003 Am-7 (rc3 errata): Invariant I-7 — cross-source attribution sum"
   - "Panel 4 §2.2: fund-attribution drift cross-trust-boundary finding"

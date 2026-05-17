@@ -8,7 +8,7 @@ threat_id: "Panel 2 §3.1 TM-D2 (replay flood); QA-Pro Sprint 12 audit finding #
 severity: critical
 target: hub
 priority: must
-evidence_url: "https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md"
+evidence_url: "https://github.com/jecpdev/jecp-spec/blob/main/adr/0004-idempotency-x402.md"
 description: >
   The Hub keeper's recordSettlement driver MUST treat each (chain_id,
   tx_hash, log_index) tuple as a single-shot idempotency key. The SQL
@@ -105,6 +105,6 @@ postconditions:
 
 introduced_in: v1.1.0-rc3
 references:
-  - https://jecp.dev/spec/v1.1/adr/0004-idempotency-x402.md
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper
+  - https://github.com/jecpdev/jecp-spec/blob/main/adr/0004-idempotency-x402.md
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e3-11-errata--reconciler-reclassification--invariant-i-7
   - "Sprint 12 QA P0 audit: project_jecp_qa_audit_p0_fixed.md"

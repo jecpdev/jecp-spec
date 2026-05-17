@@ -8,7 +8,7 @@ threat_id: "Panel 2 §3.4 TM-ST1 (settlement timing); rc3 redesign 2026-05-16 (H
 severity: high
 target: hub
 priority: should
-evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper-latency"
+evidence_url: "https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e23-invariant-added-to-811"
 description: >
   Under the rc3 design (Hub keeper drives recordSettlement, not the
   facilitator), the wall-clock interval from "facilitator successfully
@@ -90,6 +90,6 @@ postconditions:
 
 introduced_in: v1.1.0-rc3
 references:
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#63-hub-keeper-latency
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e23-invariant-added-to-811
   - "司令塔 BS-3 確定: 60s reconciler tick × 0.5 retry budget = 30s p99 bound"
   - "x402-handoff.md (rc3 redesign §3): Hub keeper drives recordSettlement"

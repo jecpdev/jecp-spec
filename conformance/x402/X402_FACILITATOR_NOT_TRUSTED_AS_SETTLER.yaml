@@ -89,5 +89,5 @@ introduced_in: v1.1.0-rc3
 references:
   - https://github.com/x402-foundation/x402/blob/main/README.md
   - https://basescan.org/address/0x  # 8 facilitator EOAs labeled on BaseScan
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e1-61-errata--authorized_settler-redefinition
   - "x402-handoff.md §CRITICAL FINDING (2026-05-16)"

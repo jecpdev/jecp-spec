@@ -8,7 +8,7 @@ threat_id: "Panel 2 §3.1 TM-T1 (settler trust boundary); rc3 redesign finding 2
 severity: critical
 target: hub
 priority: must
-evidence_url: "https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler"
+evidence_url: "https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e1-61-errata--authorized_settler-redefinition"
 description: >
   Per the rc3 errata (2026-05-16), AUTHORIZED_SETTLER on the deployed
   JecpSplitter contract MUST equal the Hub keeper EOA whose private key
@@ -82,6 +82,6 @@ postconditions:
 
 introduced_in: v1.1.0-rc3
 references:
-  - https://jecp.dev/spec/v1.1/06-x402-integration.md#61-authorized-settler
+  - https://github.com/jecpdev/jecp-spec/blob/main/spec/v1.1.0-rc3-errata.md#e1-61-errata--authorized_settler-redefinition
   - https://github.com/jecpdev/jecp-spec/blob/main/spec/06-x402-integration.md
   - "x402-handoff.md §CRITICAL FINDING (2026-05-16): facilitator fleet ≠ single EOA"
