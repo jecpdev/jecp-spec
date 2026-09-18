@@ -34,13 +34,19 @@ ok()   { echo "$(green OK): $*"; }
 # Rule 1: every error-catalog/*.md has required fields
 # ---------------------------------------------------------------
 echo "── checking spec/error-catalog/ ──"
-catalog_count=$(find spec/error-catalog -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+# README.md and COVERAGE-PLAN.md are index/planning docs, not error pages.
+is_error_page() {
+  case "$(basename "$1")" in README.md|COVERAGE-PLAN.md) return 1 ;; esac
+  return 0
+}
+catalog_count=$(find spec/error-catalog -maxdepth 1 -name '*.md' ! -name README.md ! -name COVERAGE-PLAN.md 2>/dev/null | wc -l | tr -d ' ')
 if [ "$catalog_count" -lt 1 ]; then
   warn "spec/error-catalog/ is empty (acceptable until v1.1 errata pages land)"
 else
   ok "found $catalog_count error catalog file(s)"
   for f in spec/error-catalog/*.md; do
     [ -f "$f" ] || continue
+    is_error_page "$f" || continue
     name=$(basename "$f")
     if ! grep -q '^> Public URL: https://jecp.dev/errors/' "$f"; then
       err "$name missing '> Public URL: https://jecp.dev/errors/...' line"
