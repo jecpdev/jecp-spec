@@ -21,6 +21,9 @@ on:
       - 'conformance/**'
       - 'schemas/**'
       - 'README.md'
+      - 'scripts/check-spec-quality.sh'
+      - '.github/workflows/spec-lint.yml'
+  workflow_dispatch:
 
 jobs:
   spec-quality:
