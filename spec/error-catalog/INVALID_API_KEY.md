@@ -2,7 +2,7 @@
 
 > Public URL: https://jecp.dev/errors/invalid_api_key
 > Spec source: `spec/03-errors.md` §3.1 + `spec/02-authentication.md` §4
-> Last updated: 2026-05-17
+> Last updated: 2026-09-19
 
 ## What it means
 
@@ -28,7 +28,7 @@ This is distinct from `AUTH_REQUIRED` (no credentials supplied) and from `MANDAT
     "api": "https://jecp.dev/api/agents/register",
     "method": "POST",
     "body_example": { "name": "My Agent", "agent_type": "automation" },
-    "description": "Register an agent to receive agent_id and api_key (100 free calls)"
+    "description": "Register an agent to receive agent_id and api_key, then top up the wallet at https://jecp.dev/topup"
   }
 }
 ```

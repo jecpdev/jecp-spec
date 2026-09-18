@@ -2,11 +2,13 @@
 
 > Public URL: https://jecp.dev/errors/free_tier_exhausted
 > Spec source: `spec/03-errors.md` §3.4
-> Last updated: 2026-05-17
+> Last updated: 2026-09-19
 
 ## What it means
 
-The Agent has used up its free-tier quota. New Agents receive 100 free calls at registration for evaluation; this code fires when the 101st free-tier call is attempted with no other funding source attached. The Hub rejects before forwarding to the Provider.
+The Agent has used up its free-tier quota on a Hub that offers one (a free tier is optional; see `02-authentication.md` §3.2). This code fires when the next free-tier call is attempted with no other funding source attached. The Hub rejects before forwarding to the Provider.
+
+The reference Hub at jecp.dev ended its free tier in 2026-09: new Agents there start with 0 free calls and are billed from the wallet.
 
 HTTP status: `429 Too Many Requests`.
 
@@ -52,11 +54,11 @@ The catalog page renders the same list at `https://jecp.dev/catalog?free=true`.
 
 If your Agent is wired to on-chain USDC payment via x402, set `--pay x402` on the next invocation and the call charges the Agent's Base USDC wallet directly, bypassing the Hub-side free-tier counter.
 
-## Why the Hub has a free tier at all
+## Why a Hub might offer a free tier
 
-The free tier is for evaluation: new developers should be able to register, write an integration, and verify end-to-end without dealing with Stripe Checkout or on-chain payment up front. 100 calls is enough to write and test most integrations; after that the Agent should be on a real funding source.
+A free tier lets new developers register, write an integration, and verify end-to-end without dealing with Stripe Checkout or on-chain payment up front. Hubs that offer one should keep it small; after that the Agent should be on a real funding source.
 
-The Hub does not extend the free tier on request — gaming the free tier by registering many Agents is detectable and prohibited by the AUP. If your workload is genuinely educational or non-commercial, contact `hello@jecp.dev` for a credit grant instead of farming Agents.
+Hubs should not extend a free tier on request — gaming the free tier by registering many Agents is detectable and prohibited by the AUP. If your workload is genuinely educational or non-commercial, contact `hello@jecp.dev` for a credit grant instead of farming Agents.
 
 ## When it fires vs. `PAYMENT_REQUIRED`
 

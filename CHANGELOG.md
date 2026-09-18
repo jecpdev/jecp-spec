@@ -6,6 +6,17 @@ The repository follows [SemVer](https://semver.org). Major versions break wire c
 
 ---
 
+## Unreleased — 2026-09-19 — free tier becomes optional
+
+### Normative changes
+
+- **`spec/02-authentication.md` §3.2** — issuing a free tier and awarding referral bonuses move from SHOULD to MAY. The reference Hub at jecp.dev ended its 100-call free tier; calls are paid from the Agent's wallet. `FREE_TIER_EXHAUSTED` stays in the catalog for Hubs that offer a free tier.
+
+### Error catalog
+
+- `AUTH_REQUIRED`, `INVALID_API_KEY`: the `next_action.description` example now matches the reference Hub ("…then top up the wallet at https://jecp.dev/topup") instead of promising 100 free calls.
+- `FREE_TIER_EXHAUSTED`: reworded for an optional free tier.
+
 ## v1.1.0-rc3 — 2026-05-16 — AUTHORIZED_SETTLER redefinition (supersedes rc2)
 
 **Retracted**: `jecp-spec@v1.1.0-rc2` (2026-05-13). Tag deleted, GitHub Release marked SUPERSEDED. See `RETRACT-v1.1.0-rc2.md` for the full operator procedure.

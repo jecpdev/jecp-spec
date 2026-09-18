@@ -2,7 +2,7 @@
 
 > Public URL: https://jecp.dev/errors/auth_required
 > Spec source: `spec/03-errors.md` §3.1 + `spec/02-authentication.md` §3
-> Last updated: 2026-05-17
+> Last updated: 2026-09-19
 
 ## What it means
 
@@ -28,7 +28,7 @@ This is distinct from `INVALID_API_KEY` (credentials were provided but didn't ma
     "api": "https://jecp.dev/api/agents/register",
     "method": "POST",
     "body_example": { "name": "My Agent", "agent_type": "automation" },
-    "description": "Register an agent to receive agent_id and api_key (100 free calls)"
+    "description": "Register an agent to receive agent_id and api_key, then top up the wallet at https://jecp.dev/topup"
   }
 }
 ```
@@ -70,7 +70,7 @@ jecp register --name "My Agent" --type automation
 # prints agent_id and api_key once — store both immediately
 ```
 
-The Hub returns 100 free calls per new Agent for evaluation. After that, top up the wallet (`jecp topup 5`).
+Calls are paid from the Agent's wallet, so top it up before the first paid invocation (`jecp topup 5`). The reference Hub at jecp.dev has no free tier.
 
 ## Mandate form (alternative)
 

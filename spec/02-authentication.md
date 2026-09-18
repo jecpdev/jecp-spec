@@ -72,10 +72,10 @@ The Hub MUST:
 - Display `api_key` exactly once. The Hub MUST NOT support retrieval of the same `api_key` after issuance.
 - Apply rate limits to prevent registration flooding (the reference implementation: 10 registrations/minute global).
 
-The Hub SHOULD:
+The Hub MAY:
 
-- Issue a free tier allowance (the reference implementation: 100 free calls per Agent).
-- Track referrals via the optional `referred_by` field, awarding bonus calls to both parties.
+- Issue a free tier allowance. The reference Hub at jecp.dev does not (it ended its 100-call free tier in 2026-09); calls are paid from the Agent's wallet.
+- Track referrals via the optional `referred_by` field, optionally awarding bonus calls.
 
 ### 3.3 Storage Requirements
 
