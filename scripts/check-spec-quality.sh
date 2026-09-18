@@ -54,7 +54,7 @@ else
     if ! grep -q '^> Spec source:' "$f"; then
       err "$name missing '> Spec source: ...' line"
     fi
-    if ! grep -qE 'HTTP status:[[:space:]]*\`[0-9]{3}' "$f"; then
+    if ! grep -qE 'HTTP status:[[:space:]]*`[0-9]{3}' "$f"; then
       err "$name missing 'HTTP status: \`NNN ...\`' line"
     fi
   done
