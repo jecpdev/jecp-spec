@@ -1,7 +1,8 @@
 # JECP — x402 Integration
 
 **Spec Version**: 1.1.0
-**Status**: Stable (additive over v1.0.x)
+**Status**: Release candidate — v1.1.0-rc3 (additive over v1.0.x). Not yet GA; see [ROADMAP](../ROADMAP.md#next-v110-ga-x402-on-base-mainnet).
+**Errata**: This text is as published in v1.1.0-rc2 (retracted). [`v1.1.0-rc3-errata.md`](v1.1.0-rc3-errata.md) amends it — settlement is two-phase (facilitator pull, then Hub keeper `recordSettlement`), not single-block. Where the two conflict, the errata is normative.
 **Companion**: 01-protocol.md, 03-errors.md, 04-manifest.md, 05-discovery.md
 **ADRs**: [ADR-0003 — x402 Integration](../adr/0003-x402-integration.md), [ADR-0004 — Idempotency × x402](../adr/0004-idempotency-x402.md)
 
