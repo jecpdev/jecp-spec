@@ -90,13 +90,13 @@ curl -X POST https://jecp.dev/v1/invoke \
 ## Status
 
 **v1.0.2 — Stable** (May 2026). Backwards-compatible additions ship as v1.x; breaking changes will require v2.0.
-**v1.1.0-rc3 — Pre-release** (May 2026). x402 integration + Hub keeper trust model. Not yet GA — see [RC3-GA-GATE-CHECKLIST](https://github.com/jecpdev/JobDoneBot/tree/main/docs/jecp/release-prep/RC3-GA-GATE-CHECKLIST.md) (private).
+**v1.1.0-rc3 — Pre-release** (May 2026). x402 integration + Hub keeper trust model. Implemented in the Hub behind a feature flag, not enabled in production; the Splitter contract is not yet on mainnet. GA gates are listed in [ROADMAP.md](ROADMAP.md#next-v110-ga-x402-on-base-mainnet).
 
 ### Version table
 
 | Version | Status | Tag | Notes |
 |---|---|---|---|
-| 1.1.0-rc3 | locked design, in implementation | `v1.1.0-rc3` (pending) | current — Hub keeper integration (AUTHORIZED_SETTLER = Hub keeper EOA) |
+| 1.1.0-rc3 | pre-release — implemented, not enabled in production | `v1.1.0-rc3` (pending) | current — Hub keeper integration (AUTHORIZED_SETTLER = Hub keeper EOA) |
 | 1.1.0-rc2 | **SUPERSEDED** | `v1.1.0-rc2` (annotated) | facilitator-trust settlement model retracted; do NOT use for new integrations |
 | 1.0.2     | GA | `v1.0.2` | current stable wire-format release |
 | 1.0.0     | GA | `v1.0.0` | initial wire-stable release |

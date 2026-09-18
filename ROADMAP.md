@@ -1,57 +1,61 @@
 # JECP Roadmap
 
-> 12-week sprint plan from Sprint 1 (May 2026) to Sprint 12 (Aug 2026).
+> Where the protocol and the reference Hub actually stand, and what gates the next release.
+> Dates below are when things happened, not promises. Last updated: 2026-09-19.
 
-## Current status
+## Now
 
-- **Stage**: 0 → 1 (transitioning)
-- **Sprint**: 1 (active)
-- **Production**: jecp.dev acquired May 7, 2026
+| Track | State |
+|---|---|
+| **Spec v1.0.2** | Stable. Wire format frozen for v1.x; additions are backwards-compatible. |
+| **Reference Hub** (jecp.dev) | In production. Reports `version: 1.1.1` at [`/health`](https://jecp.dev/health). Serves the v1.0.2 wire format. |
+| **Payments today** | Per-agent USDC-denominated wallet, topped up via Stripe Checkout. Mandate budget caps enforced server-side. |
+| **Spec v1.1.0 (x402)** | Pre-release **rc3**. Implemented in the Hub behind a feature flag, **not enabled in production**. The Splitter contract is not yet deployed to Base mainnet. |
+| **TypeScript SDK** | [`@jecpdev/sdk`](https://www.npmjs.com/package/@jecpdev/sdk) 0.9.0 |
+| **CLI** | [`@jecpdev/cli`](https://www.npmjs.com/package/@jecpdev/cli) 0.8.2 |
 
-## Sprints
+## Shipped
 
-| # | Week | Theme | Status |
-|---|------|-------|--------|
-| 1 | May 7-13 | Namespace & infrastructure | 🟡 In progress |
-| 2 | May 14-20 | Billing integration (deduct + Stripe Checkout) | ⬜ Planned |
-| 3 | May 21-27 | Stripe Connect topup flow | ⬜ Planned |
-| 4 | May 28 - Jun 3 | Spec v0.1 draft (6 documents) | ⬜ Planned |
-| 5 | Jun 4-10 | jecp.dev documentation site (Astro) | ⬜ Planned |
-| 6 | Jun 11-17 | Provider Console UI (ai.jobdonebot.com/provider) | ⬜ Planned |
-| 7 | Jun 18-24 | Capability Manifest spec + @jecp/cli | ⬜ Planned |
-| 8 | Jun 25 - Jul 1 | ai.jobdonebot.com → JECP routing | ⬜ Planned |
-| 9 | Jul 2-8 | Second provider implementation (DeepL wrapper) | ⬜ Planned |
-| 10 | Jul 9-15 | QA audit + load test (k6, 1000 rps) | ⬜ Planned |
-| 11 | Jul 16-22 | Legal (ToS / Privacy) + lawyer review | ⬜ Planned |
-| 12 | Jul 23-29 | Show HN launch | ⬜ Planned |
+### v1.0 line (April–May 2026)
+- [x] Invoke envelope, capability namespaces, discovery (`/v1/capabilities`, `/.well-known/agent-guide.json`)
+- [x] Per-agent wallet + Stripe Checkout top-up
+- [x] Mandates (`budget_usdc`) enforced by the Hub
+- [x] `next_action` recovery hint on every error; public [error catalog](https://jecp.dev/errors)
+- [x] Idempotency on `(agent_id, request_id)` including mandate provenance (ADR-0001)
+- [x] SSRF defense for Provider endpoints (ADR-0002)
+- [x] Provider self-registration, DNS verification, manifest publish/promote
+- [x] Refunds, webhook subscriptions
+- [x] Per-pool bulkheads observable at `/health`
+- [x] Conformance suite (`conformance/v1.0`, `conformance/v1.1`)
 
-## Stage milestones
+### v1.1 design (May 2026)
+- [x] x402 integration design — ADR-0003, with amendment Am-7 (Hub keeper as `AUTHORIZED_SETTLER`)
+- [x] rc2 retracted and superseded by rc3 — see [RETRACT-v1.1.0-rc2.md](RETRACT-v1.1.0-rc2.md)
+- [x] rc3 errata — [`spec/v1.1.0-rc3-errata.md`](spec/v1.1.0-rc3-errata.md)
+- [x] Five x402 conformance assertions — [`conformance/x402/`](conformance/x402/)
+- [x] `JecpSplitter` contract + Foundry test suite — [jecp-contracts](https://github.com/jecpdev/jecp-contracts) (pre-audit)
 
-### Stage 1: Self-billing (target: end of Sprint 3)
-- [x] DB schema for wallets / transactions
-- [ ] Rust deduct integration
-- [ ] Stripe Checkout topup
-- [ ] First $1 in revenue
+## Next: v1.1.0 GA (x402 on Base mainnet)
 
-### Stage 2: x402 integration (target: Sprint 4-5)
-- [ ] x402 USDC support in JECP server
-- [ ] Crypto-native agents can pay without Stripe
+No date is committed. v1.1.0 goes GA only after every gate below is closed, in order:
 
-### Stage 3: Marketplace (target: end of Sprint 9)
-- [ ] Provider registration flow
-- [ ] Capability Manifest schema
-- [ ] Stripe Connect for revenue split
-- [ ] First third-party provider live
+1. [ ] Provision the Hub keeper signing key (AWS KMS, least-privilege IAM)
+2. [ ] Enable the keeper on staging; run a 7-day soak with ≥1,000 settlements and zero invariant violations
+3. [ ] Independent security audit — `JecpSplitter` (Solidity) first, then the Hub keeper (Rust)
+4. [ ] Fix or formally accept every audit finding
+5. [ ] Deploy `JecpSplitter` to Base mainnet; publish the address and `AUTHORIZED_SETTLER` for public verification
+6. [ ] Tag `v1.1.0` and enable x402 in production
 
-### Stage 4: Ecosystem (target: 6-12 months)
-- [ ] 100+ active capabilities
-- [ ] $5K+ MRR
-- [ ] Tier 1 standard recognition
+Until then, the Stripe wallet path is the only production payment path. When x402 ships it is opt-in and additive: existing integrations keep working unchanged.
+
+## Later
+
+- [ ] First third-party Provider live in the public catalog
+- [ ] Spec mirror at `jecp.dev/spec/v1.x/` (today `/spec` redirects to this repository)
+- [ ] Additional SDKs (Python first)
+- [ ] Federated Hubs — a second, independently operated Hub interoperating with jecp.dev
 
 ## How to follow
 
-- Watch this repo
-- Subscribe to https://jecp.dev/blog (Sprint 5+)
-- Follow [@jecpdev](https://x.com/jecpdev)
-
-Last updated: 2026-05-07
+- Watch this repository
+- [Discussions](https://github.com/jecpdev/jecp-spec/discussions) for design questions and RFCs
